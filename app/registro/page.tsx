@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { Suspense, useState, useTransition, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { registro } from '@/app/actions/auth'
 import { formatRut, cleanRut } from '@/lib/utils/rut'
 import Link from 'next/link'
@@ -8,10 +9,27 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 
 export default function RegistroPage() {
+  return (
+    <Suspense>
+      <RegistroForm />
+    </Suspense>
+  )
+}
+
+function RegistroForm() {
+  const searchParams = useSearchParams()
+  const codigoUrl = searchParams.get('codigo') ?? ''
+
   const [rut, setRut] = useState('')
-  const [role, setRole] = useState<'arrendador' | 'arrendatario'>('arrendador')
+  // Si viene con código en la URL es arrendatario
+  const [role, setRole] = useState<'arrendador' | 'arrendatario'>(codigoUrl ? 'arrendatario' : 'arrendador')
   const [error, setError] = useState('')
   const [isPending, startTransition] = useTransition()
+
+  // Si el código llega después de la hidratación, cambia el rol
+  useEffect(() => {
+    if (codigoUrl) setRole('arrendatario')
+  }, [codigoUrl])
 
   function handleRutChange(e: React.ChangeEvent<HTMLInputElement>) {
     setRut(formatRut(e.target.value))
@@ -34,9 +52,9 @@ export default function RegistroPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-4">
-            <span className="text-white font-bold text-lg">AP</span>
+            <span className="text-white font-bold text-lg">TA</span>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">ArriendoPro</h1>
+          <h1 className="text-2xl font-bold text-gray-900">tuarriendo</h1>
           <p className="text-gray-500 mt-1">Crear cuenta nueva</p>
         </div>
 
@@ -106,8 +124,9 @@ export default function RegistroPage() {
               <Input
                 label="Código de invitación"
                 name="codigo_invitacion"
+                defaultValue={codigoUrl}
                 placeholder="Ej: ABC12345"
-                hint="Solicita este código a tu arrendador"
+                hint={codigoUrl ? 'Código recibido por WhatsApp' : 'Solicita este código a tu arrendador'}
                 required
               />
             )}

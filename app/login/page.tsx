@@ -34,9 +34,9 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-4">
-            <span className="text-white font-bold text-lg">AP</span>
+            <span className="text-white font-bold text-lg">TA</span>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">ArriendoPro</h1>
+          <h1 className="text-2xl font-bold text-gray-900">tuarriendo</h1>
           <p className="text-gray-500 mt-1">Gestión de arriendos en Chile</p>
         </div>
 
