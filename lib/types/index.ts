@@ -1,0 +1,58 @@
+export type Role = 'arrendador' | 'arrendatario'
+export type EstadoPago = 'pendiente' | 'pagado' | 'atrasado'
+
+export interface Profile {
+  id: string
+  rut: string
+  nombre: string
+  email?: string
+  role: Role
+  created_at: string
+}
+
+export interface Propiedad {
+  id: string
+  arrendador_id: string
+  nombre: string
+  direccion: string
+  descripcion?: string
+  valor_uf: number
+  activa: boolean
+  created_at: string
+}
+
+export interface CodigoInvitacion {
+  id: string
+  propiedad_id: string
+  codigo: string
+  usado: boolean
+  arrendatario_id?: string
+  created_at: string
+  expires_at: string
+}
+
+export interface Contrato {
+  id: string
+  propiedad_id: string
+  arrendatario_id: string
+  fecha_inicio: string
+  fecha_fin?: string
+  valor_uf: number
+  dia_pago: number
+  activo: boolean
+  created_at: string
+  propiedades?: Propiedad
+  profiles?: Profile
+}
+
+export interface Pago {
+  id: string
+  contrato_id: string
+  periodo: string
+  valor_uf: number
+  valor_clp?: number
+  estado: EstadoPago
+  fecha_pago?: string
+  notas?: string
+  created_at: string
+}
