@@ -106,11 +106,12 @@ export default async function ArrendadorDashboard() {
                   </div>
                   <p className="text-sm text-gray-500 mb-3">{p.direccion}</p>
                   <p className="text-lg font-bold text-blue-700">{formatUF(p.valor_uf)} UF/mes</p>
-                  {contrato && (
-                    <p className="text-xs text-gray-500 mt-2">
-                      Arrendatario: {(contrato as Contrato & { profiles: { nombre: string } }).profiles?.nombre}
-                    </p>
-                  )}
+                  <p className="text-xs mt-2 flex items-center gap-1">
+                    {contrato
+                      ? <><span className="text-gray-400">Arrendatario:</span> <span className="text-gray-700 font-medium">{(contrato as Contrato & { profiles: { nombre: string } }).profiles?.nombre}</span></>
+                      : <span className="text-amber-500 italic">Sin arrendatario vinculado</span>
+                    }
+                  </p>
                 </Card>
               </Link>
             )
