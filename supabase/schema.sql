@@ -64,6 +64,18 @@ CREATE TABLE IF NOT EXISTS public.pagos (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Gmail connections for arrendadores
+CREATE TABLE IF NOT EXISTS public.email_connections (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  arrendador_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL UNIQUE,
+  provider TEXT DEFAULT 'gmail',
+  email TEXT NOT NULL,
+  access_token TEXT NOT NULL,
+  refresh_token TEXT,
+  expires_at TIMESTAMPTZ,
+  connected_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Schema permissions (required for service_role and authenticated users)
 GRANT USAGE ON SCHEMA public TO postgres, anon, authenticated, service_role;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO postgres, anon, authenticated, service_role;

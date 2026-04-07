@@ -62,3 +62,26 @@ export interface Pago {
   notas?: string
   created_at: string
 }
+
+export interface EmailConnection {
+  id: string
+  arrendador_id: string
+  provider: 'gmail'
+  email: string
+  connected_at: string
+}
+
+export interface PagoSugerido {
+  emailId: string
+  fecha: string
+  asunto: string
+  monto_clp?: number
+  rut_detectado?: string
+  nombre_detectado?: string
+  banco?: string
+  contrato_id?: string
+  arrendatario_nombre?: string
+  propiedad_nombre?: string
+  confianza: 'alta' | 'media' | 'baja'
+  periodo: string
+}

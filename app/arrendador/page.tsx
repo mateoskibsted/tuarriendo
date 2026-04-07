@@ -65,6 +65,19 @@ export default async function ArrendadorDashboard() {
         <StatCard label="Pagos atrasados" value={pagosAtrasados?.length ?? 0} color="red" />
       </div>
 
+      {/* Quick links */}
+      <div className="flex gap-3">
+        <Link
+          href="/arrendador/email"
+          className="flex items-center gap-2 text-sm bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors"
+        >
+          <svg className="w-4 h-4 text-red-500" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-2 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
+          </svg>
+          Correos y pagos
+        </Link>
+      </div>
+
       {/* Properties */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-900">Mis propiedades</h2>
