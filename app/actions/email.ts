@@ -18,10 +18,13 @@ function buildOAuthClient(connection: {
   refresh_token?: string | null
   expires_at?: string | null
 }) {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : 'http://localhost:3000'
   const oauth2Client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
-    `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/gmail/callback`
+    `${appUrl}/api/auth/gmail/callback`
   )
   oauth2Client.setCredentials({
     access_token: connection.access_token,

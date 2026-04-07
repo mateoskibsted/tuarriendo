@@ -5,30 +5,30 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function GET(request: NextRequest) {
-  const base = process.env.NEXT_PUBLIC_APP_URL!
+  const origin = new URL(request.url).origin
   const searchParams = request.nextUrl.searchParams
   const code = searchParams.get('code')
   const state = searchParams.get('state')
   const error = searchParams.get('error')
 
   if (error) {
-    return NextResponse.redirect(`${base}/arrendador/email?error=cancelled`)
+    return NextResponse.redirect(`${origin}/arrendador/email?error=cancelled`)
   }
 
   const cookieStore = await cookies()
   const savedState = cookieStore.get('gmail_oauth_state')?.value
   if (!savedState || savedState !== state) {
-    return NextResponse.redirect(`${base}/arrendador/email?error=invalid_state`)
+    return NextResponse.redirect(`${origin}/arrendador/email?error=invalid_state`)
   }
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.redirect(`${base}/login`)
+  if (!user) return NextResponse.redirect(`${origin}/login`)
 
   const oauth2Client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
-    `${base}/api/auth/gmail/callback`
+    `${origin}/api/auth/gmail/callback`
   )
 
   let tokens
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     const result = await oauth2Client.getToken(code!)
     tokens = result.tokens
   } catch {
-    return NextResponse.redirect(`${base}/arrendador/email?error=token_error`)
+    return NextResponse.redirect(`${origin}/arrendador/email?error=token_error`)
   }
 
   oauth2Client.setCredentials(tokens)
@@ -60,5 +60,5 @@ export async function GET(request: NextRequest) {
   )
 
   cookieStore.delete('gmail_oauth_state')
-  return NextResponse.redirect(`${base}/arrendador/email?success=connected`)
+  return NextResponse.redirect(`${origin}/arrendador/email?success=connected`)
 }
