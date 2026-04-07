@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { google } from 'googleapis'
+import Anthropic from '@anthropic-ai/sdk'
 import { revalidatePath } from 'next/cache'
 import { parseEmailForPayment, extractTextFromPayload } from '@/lib/utils/email-parser'
 import type { PagoSugerido } from '@/lib/types'
@@ -18,13 +19,11 @@ function buildOAuthClient(connection: {
   refresh_token?: string | null
   expires_at?: string | null
 }) {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : 'http://localhost:3000'
   const oauth2Client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
-    `${appUrl}/api/auth/gmail/callback`
+    // redirect_uri only used during token exchange, not scanning
+    'https://tuarriendo-ten.vercel.app/api/auth/gmail/callback'
   )
   oauth2Client.setCredentials({
     access_token: connection.access_token,
@@ -34,6 +33,91 @@ function buildOAuthClient(connection: {
       : undefined,
   })
   return oauth2Client
+}
+
+/** Use Claude to match a batch of parsed emails against known tenants. */
+async function matchEmailsWithAI(
+  emails: Array<{
+    idx: number
+    asunto: string
+    cuerpo: string
+    monto_clp?: number
+    rut_detectado?: string
+    nombre_detectado?: string
+  }>,
+  tenants: Array<{
+    idx: number
+    contratoId: string
+    nombre: string
+    rut: string
+    propiedadNombre: string
+    monto: number
+    moneda: string
+  }>
+): Promise<Array<{ emailIdx: number; tenantIdx: number; confianza: 'alta' | 'media' }>> {
+  if (emails.length === 0 || tenants.length === 0) return []
+
+  const client = new Anthropic()
+
+  const tenantsText = tenants.map(t =>
+    `[${t.idx}] Nombre: ${t.nombre} | RUT: ${t.rut} | Propiedad: ${t.propiedadNombre} | Monto esperado: ${t.monto} ${t.moneda}`
+  ).join('\n')
+
+  const emailsText = emails.map(e =>
+    `[${e.idx}] Asunto: ${e.asunto}\nMonto detectado: ${e.monto_clp ? `$${e.monto_clp}` : 'no detectado'} | RUT detectado: ${e.rut_detectado ?? 'ninguno'} | Nombre detectado: ${e.nombre_detectado ?? 'ninguno'}\nCuerpo (extracto): ${e.cuerpo.slice(0, 400)}`
+  ).join('\n\n---\n\n')
+
+  const prompt = `Eres un asistente que analiza correos bancarios chilenos para detectar pagos de arriendo.
+
+ARRENDATARIOS REGISTRADOS:
+${tenantsText}
+
+CORREOS A ANALIZAR:
+${emailsText}
+
+TAREA: Determina cuáles correos son pagos de arriendo de algún arrendatario registrado.
+Solo incluye coincidencias donde estés seguro de que el correo corresponde a un pago de arriendo.
+Ignora correos que claramente no son pagos de arriendo (compras, sueldos, otros).
+
+Responde ÚNICAMENTE con un JSON válido, sin texto adicional:
+[
+  {"email": <número del correo>, "arrendatario": <número del arrendatario>, "confianza": "alta" o "media"},
+  ...
+]
+
+Reglas:
+- "alta": RUT coincide exactamente, o nombre exacto + monto muy similar al esperado
+- "media": nombre parcial o monto similar al esperado, pero sin certeza total
+- Si un correo no corresponde a ningún arrendatario, NO lo incluyas en la respuesta
+- Si no hay coincidencias, responde con []`
+
+  try {
+    const response = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 500,
+      messages: [{ role: 'user', content: prompt }],
+    })
+
+    const text = response.content[0].type === 'text' ? response.content[0].text : '[]'
+    const jsonMatch = text.match(/\[[\s\S]*\]/)
+    if (!jsonMatch) return []
+
+    const parsed = JSON.parse(jsonMatch[0]) as Array<{
+      email: number
+      arrendatario: number
+      confianza: string
+    }>
+
+    return parsed
+      .filter(r => r.confianza === 'alta' || r.confianza === 'media')
+      .map(r => ({
+        emailIdx: r.email,
+        tenantIdx: r.arrendatario,
+        confianza: r.confianza as 'alta' | 'media',
+      }))
+  } catch {
+    return []
+  }
 }
 
 export async function desconectarEmail() {
@@ -54,7 +138,6 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }
 
-  // Load stored Gmail connection
   const { data: connection } = await admin
     .from('email_connections')
     .select('*')
@@ -63,25 +146,45 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
 
   if (!connection) return { error: 'No hay correo conectado' }
 
-  // Load arrendatarios linked to this arrendador
+  // Load active properties
   const { data: propiedades } = await admin
     .from('propiedades')
-    .select('id')
+    .select('id, valor_uf, moneda')
     .eq('arrendador_id', user.id)
     .eq('activa', true)
 
   const propiedadIds = (propiedades ?? []).map((p: { id: string }) => p.id)
   if (propiedadIds.length === 0) return { sugerencias: [] }
 
+  // Load active contracts with tenant info
   const { data: contratos } = await admin
     .from('contratos')
-    .select('id, propiedad_id, propiedades(nombre), profiles!contratos_arrendatario_id_fkey(nombre, rut)')
+    .select('id, propiedad_id, propiedades(nombre, valor_uf, moneda), profiles!contratos_arrendatario_id_fkey(nombre, rut)')
     .in('propiedad_id', propiedadIds)
     .eq('activo', true)
 
-  const oauth2Client = buildOAuthClient(connection)
+  // No tenants = nothing to match against
+  if (!contratos || contratos.length === 0) return { sugerencias: [] }
 
-  // Refresh token in DB if googleapis refreshes it automatically
+  // Build tenant list for AI
+  const tenants = contratos.map((c, idx) => {
+    const profile = (c as unknown as { profiles?: { nombre: string; rut: string } }).profiles
+    const propiedad = (c as unknown as { propiedades?: { nombre: string; valor_uf: number; moneda: string } }).propiedades
+    return {
+      idx: idx + 1,
+      contratoId: c.id,
+      nombre: profile?.nombre ?? '',
+      rut: profile?.rut ?? '',
+      propiedadNombre: propiedad?.nombre ?? '',
+      monto: propiedad?.valor_uf ?? 0,
+      moneda: propiedad?.moneda ?? 'UF',
+    }
+  }).filter(t => t.nombre)
+
+  if (tenants.length === 0) return { sugerencias: [] }
+
+  // Connect to Gmail
+  const oauth2Client = buildOAuthClient(connection)
   oauth2Client.on('tokens', async (newTokens) => {
     if (newTokens.access_token) {
       await admin.from('email_connections').update({
@@ -99,97 +202,82 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
   const query = 'subject:(transferencia OR depósito OR deposito OR abono OR "pago recibido") newer_than:30d'
   let messageList
   try {
-    const res = await gmail.users.messages.list({
-      userId: 'me',
-      q: query,
-      maxResults: 30,
-    })
+    const res = await gmail.users.messages.list({ userId: 'me', q: query, maxResults: 30 })
     messageList = res.data.messages ?? []
   } catch {
     return { error: 'Error al leer correos. Reconecta tu cuenta de Gmail.' }
   }
 
-  const sugerencias: PagoSugerido[] = []
-  const periodoActual = new Date().toISOString().slice(0, 7) // YYYY-MM
+  if (messageList.length === 0) return { sugerencias: [] }
+
+  // Fetch and parse each email
+  const periodoActual = new Date().toISOString().slice(0, 7)
+  const parsedEmails: Array<{
+    idx: number
+    emailId: string
+    asunto: string
+    fecha: string
+    cuerpo: string
+    monto_clp?: number
+    rut_detectado?: string
+    nombre_detectado?: string
+    banco?: string
+  }> = []
 
   for (const msg of messageList) {
     if (!msg.id) continue
-
-    let msgData
     try {
-      const res = await gmail.users.messages.get({
-        userId: 'me',
-        id: msg.id,
-        format: 'full',
+      const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'full' })
+      const msgData = res.data
+      const headers = msgData.payload?.headers ?? []
+      const subject = headers.find(h => h.name === 'Subject')?.value ?? ''
+      const dateHeader = headers.find(h => h.name === 'Date')?.value ?? ''
+      const body = extractTextFromPayload(msgData.payload ?? {})
+      const parsed = parseEmailForPayment(subject, body)
+
+      parsedEmails.push({
+        idx: parsedEmails.length + 1,
+        emailId: msg.id,
+        asunto: subject,
+        fecha: dateHeader,
+        cuerpo: body,
+        monto_clp: parsed.monto_clp,
+        rut_detectado: parsed.rut,
+        nombre_detectado: parsed.nombre,
+        banco: parsed.banco,
       })
-      msgData = res.data
     } catch {
       continue
     }
-
-    const headers = msgData.payload?.headers ?? []
-    const subject = headers.find(h => h.name === 'Subject')?.value ?? ''
-    const dateHeader = headers.find(h => h.name === 'Date')?.value ?? ''
-    const body = extractTextFromPayload(msgData.payload ?? {})
-
-    const parsed = parseEmailForPayment(subject, body)
-    if (!parsed.monto_clp) continue // Skip emails without a detectable amount
-
-    // Try to match with an arrendatario
-    let contratoId: string | undefined
-    let arrendatarioNombre: string | undefined
-    let propiedadNombre: string | undefined
-    let confianza: PagoSugerido['confianza'] = 'baja'
-
-    for (const contrato of contratos ?? []) {
-      const profile = (contrato as unknown as { profiles?: { nombre: string; rut: string } }).profiles
-      const propiedad = (contrato as unknown as { propiedades?: { nombre: string } }).propiedades
-      if (!profile) continue
-
-      // Normalize RUT for comparison (remove dots and dash)
-      const arrendatarioRut = profile.rut.replace(/\./g, '').replace('-', '').toUpperCase()
-
-      if (parsed.rut && parsed.rut === arrendatarioRut) {
-        contratoId = contrato.id
-        arrendatarioNombre = profile.nombre
-        propiedadNombre = propiedad?.nombre
-        confianza = 'alta'
-        break
-      }
-
-      if (
-        parsed.nombre &&
-        profile.nombre.toLowerCase().includes(parsed.nombre.toLowerCase().split(' ')[0])
-      ) {
-        contratoId = contrato.id
-        arrendatarioNombre = profile.nombre
-        propiedadNombre = propiedad?.nombre
-        confianza = 'media'
-        // Don't break — keep looking for a RUT match
-      }
-    }
-
-    sugerencias.push({
-      emailId: msg.id,
-      fecha: dateHeader,
-      asunto: subject,
-      monto_clp: parsed.monto_clp,
-      rut_detectado: parsed.rut,
-      nombre_detectado: parsed.nombre,
-      banco: parsed.banco,
-      contrato_id: contratoId,
-      arrendatario_nombre: arrendatarioNombre,
-      propiedad_nombre: propiedadNombre,
-      confianza,
-      periodo: periodoActual,
-    })
   }
 
-  // Sort: high confidence first
-  sugerencias.sort((a, b) => {
-    const order = { alta: 0, media: 1, baja: 2 }
-    return order[a.confianza] - order[b.confianza]
-  })
+  // Use Claude AI to match emails with tenants
+  const matches = await matchEmailsWithAI(parsedEmails, tenants)
+
+  // Build final suggestions from AI matches only
+  const sugerencias: PagoSugerido[] = matches.map(match => {
+    const email = parsedEmails.find(e => e.idx === match.emailIdx)
+    const tenant = tenants.find(t => t.idx === match.tenantIdx)
+    if (!email || !tenant) return null
+
+    return {
+      emailId: email.emailId,
+      fecha: email.fecha,
+      asunto: email.asunto,
+      monto_clp: email.monto_clp,
+      rut_detectado: email.rut_detectado,
+      nombre_detectado: email.nombre_detectado,
+      banco: email.banco,
+      contrato_id: tenant.contratoId,
+      arrendatario_nombre: tenant.nombre,
+      propiedad_nombre: tenant.propiedadNombre,
+      confianza: match.confianza,
+      periodo: periodoActual,
+    }
+  }).filter(Boolean) as PagoSugerido[]
+
+  // Sort: alta first
+  sugerencias.sort((a, b) => (a.confianza === 'alta' ? -1 : 1))
 
   return { sugerencias }
 }
@@ -202,7 +290,6 @@ export async function confirmarPagoEmail(
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }
 
-  // Verify this contract belongs to this arrendador
   const { data: contrato } = await admin
     .from('contratos')
     .select('id, propiedad_id, propiedades(arrendador_id)')
@@ -214,7 +301,6 @@ export async function confirmarPagoEmail(
 
   if (!contrato || arrendadorId !== user.id) return { error: 'No autorizado' }
 
-  // Upsert payment for the period
   const { data: existing } = await admin
     .from('pagos')
     .select('id')
@@ -225,7 +311,7 @@ export async function confirmarPagoEmail(
   const payload = {
     contrato_id: contratoId,
     periodo,
-    valor_uf: 0, // Will be 0 for CLP-only payments from email
+    valor_uf: 0,
     valor_clp: montoCLP,
     estado: 'pagado',
     fecha_pago: new Date().toISOString(),
