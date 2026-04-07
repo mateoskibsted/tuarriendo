@@ -10,6 +10,8 @@ export interface Profile {
   created_at: string
 }
 
+export type Moneda = 'UF' | 'CLP'
+
 export interface Propiedad {
   id: string
   arrendador_id: string
@@ -17,6 +19,10 @@ export interface Propiedad {
   direccion: string
   descripcion?: string
   valor_uf: number
+  moneda: Moneda
+  dia_vencimiento: number
+  multa_monto?: number
+  multa_moneda: Moneda
   activa: boolean
   created_at: string
 }

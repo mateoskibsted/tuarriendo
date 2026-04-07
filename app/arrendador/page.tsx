@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import Link from 'next/link'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
-import { formatUF } from '@/lib/utils/uf'
+import { formatUF, formatCLP } from '@/lib/utils/uf'
 import type { Propiedad, Contrato } from '@/lib/types'
 
 const MAX_PROPIEDADES = 10
@@ -105,7 +105,9 @@ export default async function ArrendadorDashboard() {
                     </Badge>
                   </div>
                   <p className="text-sm text-gray-500 mb-3">{p.direccion}</p>
-                  <p className="text-lg font-bold text-blue-700">{formatUF(p.valor_uf)} UF/mes</p>
+                  <p className="text-lg font-bold text-blue-700">
+                    {p.moneda === 'CLP' ? formatCLP(p.valor_uf) : `${formatUF(p.valor_uf)} UF`}/mes
+                  </p>
                   <p className="text-xs mt-2 flex items-center gap-1">
                     {contrato
                       ? <><span className="text-gray-400">Arrendatario:</span> <span className="text-gray-700 font-medium">{(contrato as Contrato & { profiles: { nombre: string } }).profiles?.nombre}</span></>

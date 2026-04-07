@@ -18,6 +18,10 @@ CREATE TABLE IF NOT EXISTS public.propiedades (
   direccion TEXT NOT NULL,
   descripcion TEXT,
   valor_uf NUMERIC(10, 2) NOT NULL,
+  moneda TEXT DEFAULT 'UF' CHECK (moneda IN ('UF', 'CLP')),
+  dia_vencimiento INTEGER DEFAULT 5 CHECK (dia_vencimiento BETWEEN 1 AND 28),
+  multa_monto NUMERIC(10, 2),
+  multa_moneda TEXT DEFAULT 'UF' CHECK (multa_moneda IN ('UF', 'CLP')),
   activa BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );

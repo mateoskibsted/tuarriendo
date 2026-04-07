@@ -28,12 +28,17 @@ export async function crearPropiedad(formData: FormData) {
     return { error: `Límite máximo de ${MAX_PROPIEDADES} propiedades alcanzado` }
   }
 
+  const multaMonto = formData.get('multa_monto') as string
   const { error } = await admin.from('propiedades').insert({
     arrendador_id: user.id,
     nombre: formData.get('nombre') as string,
     direccion: formData.get('direccion') as string,
     descripcion: formData.get('descripcion') as string,
     valor_uf: parseFloat(formData.get('valor_uf') as string),
+    moneda: formData.get('moneda') as string,
+    dia_vencimiento: parseInt(formData.get('dia_vencimiento') as string) || 5,
+    multa_monto: multaMonto ? parseFloat(multaMonto) : null,
+    multa_moneda: formData.get('multa_moneda') as string,
   })
 
   if (error) return { error: error.message }
@@ -46,6 +51,7 @@ export async function actualizarPropiedad(id: string, formData: FormData) {
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }
 
+  const multaMonto = formData.get('multa_monto') as string
   const { error } = await admin
     .from('propiedades')
     .update({
@@ -53,9 +59,13 @@ export async function actualizarPropiedad(id: string, formData: FormData) {
       direccion: formData.get('direccion') as string,
       descripcion: formData.get('descripcion') as string,
       valor_uf: parseFloat(formData.get('valor_uf') as string),
+      moneda: formData.get('moneda') as string,
+      dia_vencimiento: parseInt(formData.get('dia_vencimiento') as string) || 5,
+      multa_monto: multaMonto ? parseFloat(multaMonto) : null,
+      multa_moneda: formData.get('multa_moneda') as string,
     })
     .eq('id', id)
-    .eq('arrendador_id', user.id)  // ownership enforced in code
+    .eq('arrendador_id', user.id)
 
   if (error) return { error: error.message }
 
