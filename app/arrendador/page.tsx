@@ -4,6 +4,7 @@ import Link from 'next/link'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import { formatUF, formatCLP } from '@/lib/utils/uf'
+import PagosDetectadosAuto from './PagosDetectadosAuto'
 import type { Propiedad, Contrato } from '@/lib/types'
 
 const MAX_PROPIEDADES = 10
@@ -12,6 +13,8 @@ export default async function ArrendadorDashboard() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const admin = createAdminClient()
+
+  const mesActual = new Date().toISOString().slice(0, 7) // "YYYY-MM"
 
   const { data: propiedades } = await admin
     .from('propiedades')
@@ -31,6 +34,19 @@ export default async function ArrendadorDashboard() {
     : { data: [] }
 
   const contratoIds = (contratos ?? []).map((c: Contrato) => c.id)
+
+  // Pagos confirmados este mes
+  const { data: pagosEsteMes } = contratoIds.length > 0
+    ? await admin
+        .from('pagos')
+        .select('contrato_id, estado')
+        .in('contrato_id', contratoIds)
+        .eq('periodo', mesActual)
+        .eq('estado', 'pagado')
+    : { data: [] }
+
+  const pagosEsteMesSet = new Set((pagosEsteMes ?? []).map((p: { contrato_id: string }) => p.contrato_id))
+
   const { data: pagosPendientes } = contratoIds.length > 0
     ? await admin
         .from('pagos')
@@ -47,8 +63,17 @@ export default async function ArrendadorDashboard() {
         .eq('estado', 'atrasado')
     : { data: [] }
 
+  // Check if Gmail is connected
+  const { data: emailConnection } = await admin
+    .from('email_connections')
+    .select('id')
+    .eq('arrendador_id', user!.id)
+    .single()
+
   const totalPropiedades = propiedades?.length ?? 0
   const puedeAgregarMas = totalPropiedades < MAX_PROPIEDADES
+  const propiedadesConInquilino = (contratos ?? []).length
+  const pagadosEsteMes = pagosEsteMes?.length ?? 0
 
   return (
     <div className="space-y-6">
@@ -58,25 +83,40 @@ export default async function ArrendadorDashboard() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <StatCard label="Propiedades" value={`${totalPropiedades}/${MAX_PROPIEDADES}`} color="blue" />
-        <StatCard label="Arrendatarios activos" value={contratos?.length ?? 0} color="green" />
-        <StatCard label="Pagos pendientes" value={pagosPendientes?.length ?? 0} color="yellow" />
-        <StatCard label="Pagos atrasados" value={pagosAtrasados?.length ?? 0} color="red" />
+        <StatCard label="Arrendatarios" value={propiedadesConInquilino} color="green" />
+        <StatCard label={`Pagados (${mesActual})`} value={pagadosEsteMes} color="green" />
+        <StatCard label="Sin pago este mes" value={propiedadesConInquilino - pagadosEsteMes} color={propiedadesConInquilino - pagadosEsteMes > 0 ? 'red' : 'gray'} />
       </div>
 
-      {/* Quick links */}
-      <div className="flex gap-3">
-        <Link
-          href="/arrendador/email"
-          className="flex items-center gap-2 text-sm bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors"
-        >
-          <svg className="w-4 h-4 text-red-500" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-2 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
-          </svg>
-          Correos y pagos
-        </Link>
-      </div>
+      {/* Auto-scan pagos desde correo */}
+      {emailConnection && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-base font-semibold text-gray-900">Pagos detectados en correo</h2>
+            <Link href="/arrendador/email" className="text-xs text-blue-600 hover:underline">
+              Ver todos →
+            </Link>
+          </div>
+          <PagosDetectadosAuto />
+        </div>
+      )}
+
+      {/* No tiene Gmail conectado */}
+      {!emailConnection && (
+        <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 flex items-center justify-between gap-4">
+          <p className="text-sm text-amber-800">
+            Conecta tu Gmail para detectar pagos automáticamente al entrar al panel.
+          </p>
+          <Link
+            href="/arrendador/email"
+            className="shrink-0 text-sm bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg transition-colors"
+          >
+            Conectar Gmail
+          </Link>
+        </div>
+      )}
 
       {/* Properties */}
       <div className="flex items-center justify-between">
@@ -108,14 +148,20 @@ export default async function ArrendadorDashboard() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {propiedades.map((p: Propiedad) => {
             const contrato = (contratos ?? []).find((c: Contrato) => c.propiedad_id === p.id)
+            const tienePago = contrato && pagosEsteMesSet.has(contrato.id)
+
             return (
               <Link key={p.id} href={`/arrendador/propiedades/${p.id}`}>
                 <Card className="hover:border-blue-300 transition-colors cursor-pointer h-full">
                   <div className="flex justify-between items-start mb-3">
                     <h3 className="font-semibold text-gray-900">{p.nombre}</h3>
-                    <Badge variant={contrato ? 'green' : 'gray'}>
-                      {contrato ? 'Ocupada' : 'Disponible'}
-                    </Badge>
+                    {!contrato ? (
+                      <Badge variant="gray">Disponible</Badge>
+                    ) : tienePago ? (
+                      <Badge variant="green">Pagado</Badge>
+                    ) : (
+                      <Badge variant="yellow">Sin pago</Badge>
+                    )}
                   </div>
                   <p className="text-sm text-gray-500 mb-3">{p.direccion}</p>
                   <p className="text-lg font-bold text-blue-700">
@@ -143,6 +189,7 @@ function StatCard({ label, value, color }: { label: string; value: number | stri
     green: 'bg-green-50 text-green-700 border-green-100',
     yellow: 'bg-yellow-50 text-yellow-700 border-yellow-100',
     red: 'bg-red-50 text-red-700 border-red-100',
+    gray: 'bg-gray-50 text-gray-600 border-gray-100',
   }
 
   return (
