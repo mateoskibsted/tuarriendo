@@ -24,6 +24,8 @@ export interface Propiedad {
   multa_monto?: number
   multa_moneda: Moneda
   activa: boolean
+  arrendatario_informal_nombre?: string | null
+  arrendatario_informal_celular?: string | null
   created_at: string
 }
 

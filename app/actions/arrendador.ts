@@ -194,6 +194,46 @@ export async function eliminarPropiedad(propiedadId: string) {
   return { success: true }
 }
 
+export async function guardarArrendatarioInformal(propiedadId: string, nombre: string, celular: string) {
+  const { user, admin } = await getAuthContext()
+  if (!user) return { error: 'No autenticado' }
+
+  const { error } = await admin
+    .from('propiedades')
+    .update({
+      arrendatario_informal_nombre: nombre,
+      arrendatario_informal_celular: celular || null,
+    })
+    .eq('id', propiedadId)
+    .eq('arrendador_id', user.id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath(`/arrendador/propiedades/${propiedadId}`)
+  revalidatePath('/arrendador')
+  return { success: true }
+}
+
+export async function limpiarArrendatarioInformal(propiedadId: string) {
+  const { user, admin } = await getAuthContext()
+  if (!user) return { error: 'No autenticado' }
+
+  const { error } = await admin
+    .from('propiedades')
+    .update({
+      arrendatario_informal_nombre: null,
+      arrendatario_informal_celular: null,
+    })
+    .eq('id', propiedadId)
+    .eq('arrendador_id', user.id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath(`/arrendador/propiedades/${propiedadId}`)
+  revalidatePath('/arrendador')
+  return { success: true }
+}
+
 export async function desvincularArrendatario(contratoId: string) {
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }

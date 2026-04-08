@@ -12,6 +12,7 @@ import CodigoInvitacionSection from './CodigoInvitacionSection'
 import PagosSection from './PagosSection'
 import ContratoSection from './ContratoSection'
 import DesvincularButton from './DesvincularButton'
+import MarcarArrendadaSection from './MarcarArrendadaSection'
 
 export default async function PropiedadPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -105,10 +106,17 @@ export default async function PropiedadPage({ params }: { params: Promise<{ id: 
             </div>
           ) : (
             <div className="space-y-4">
-              <p className="text-sm text-gray-600">
-                Genera un código de invitación y compártelo con tu arrendatario para que se registre y quede vinculado a esta propiedad.
-              </p>
-              <CodigoInvitacionSection propiedadId={id} codigos={codigos ?? []} />
+              <MarcarArrendadaSection
+                propiedadId={id}
+                nombreActual={propiedad.arrendatario_informal_nombre}
+                celularActual={propiedad.arrendatario_informal_celular}
+              />
+              <div className="border-t border-gray-100 pt-4">
+                <p className="text-sm text-gray-600 mb-3">
+                  O genera un código de invitación para que tu arrendatario se registre y quede vinculado a esta propiedad.
+                </p>
+                <CodigoInvitacionSection propiedadId={id} codigos={codigos ?? []} />
+              </div>
             </div>
           )}
         </div>
