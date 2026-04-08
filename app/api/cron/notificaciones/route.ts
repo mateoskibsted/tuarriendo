@@ -160,9 +160,9 @@ export async function GET(request: NextRequest) {
       let multaTexto = ''
       let totalTexto = ''
       if (propiedad.multa_monto) {
-        const multaDiariaCLP = propiedad.multa_moneda === 'CLP'
+        const multaDiariaCLP = Math.round(propiedad.multa_moneda === 'CLP'
           ? propiedad.multa_monto
-          : propiedad.multa_monto * ufValue
+          : propiedad.multa_monto * ufValue)
         const multaAcumuladaCLP = multaDiariaCLP * dias
         const montoPrincipalCLP = propiedad.moneda === 'CLP'
           ? propiedad.valor_uf
