@@ -152,11 +152,14 @@ export async function GET(request: NextRequest) {
     } else if (tipo === 'vencimiento') {
       mensaje = `Hola ${arrendatario.nombre}\n\nHoy vence el plazo de pago de tu arriendo de *${propiedad.nombre}*.\n\n💰 Monto: ${montoTexto}\n\nRealiza el pago hoy para evitar multas. ¡Gracias!`
     } else if (tipo.startsWith('atraso_')) {
-      const dias = Math.abs(diasRestantes)
+      // When forced (testing), extract days from the tipo string itself
+      const dias = forzarTipo?.startsWith('atraso_')
+        ? parseInt(forzarTipo.replace('atraso_', ''))
+        : Math.abs(diasRestantes)
+
       let multaTexto = ''
       let totalTexto = ''
       if (propiedad.multa_monto) {
-        // Multa acumulada = multa_monto * días de atraso
         const multaDiariaCLP = propiedad.multa_moneda === 'CLP'
           ? propiedad.multa_monto
           : propiedad.multa_monto * ufValue
@@ -164,7 +167,8 @@ export async function GET(request: NextRequest) {
         const montoPrincipalCLP = propiedad.moneda === 'CLP'
           ? propiedad.valor_uf
           : propiedad.valor_uf * ufValue
-        multaTexto = `\n⚠️ Multa acumulada (${dias} día${dias > 1 ? 's' : ''}): ${formatCLPLocal(multaAcumuladaCLP)}`
+        multaTexto = `\n\n⚠️ Multa diaria: ${formatCLPLocal(multaDiariaCLP)}`
+        if (dias > 1) multaTexto += `\n⚠️ Multa acumulada (${dias} días): ${formatCLPLocal(multaAcumuladaCLP)}`
         totalTexto = `\n💳 *Total a pagar: ${formatCLPLocal(montoPrincipalCLP + multaAcumuladaCLP)}*`
       }
       mensaje = `Hola ${arrendatario.nombre}\n\nTu arriendo de *${propiedad.nombre}* lleva *${dias} día${dias > 1 ? 's' : ''} de atraso*.\n\n💰 Monto arriendo: ${montoTexto}${multaTexto}${totalTexto}\n\nPor favor regulariza tu situación lo antes posible.`
