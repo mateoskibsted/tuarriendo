@@ -38,6 +38,9 @@ export async function GET(request: NextRequest) {
   const hoy = hoyChile()
   const periodoActual = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`
   const ufValue = await getUFValue()
+  // Optional: force a specific notification type for testing
+  // e.g. ?forzar_tipo=vencimiento or ?forzar_tipo=atraso_3
+  const forzarTipo = request.nextUrl.searchParams.get('forzar_tipo')
 
   // Load all active contracts with tenant phone, property details
   const { data: contratos } = await admin
@@ -120,17 +123,20 @@ export async function GET(request: NextRequest) {
     const diasRestantes = diasHasta(fechaVencimiento, hoy)
 
     // Determine which notification type to send
-    let tipo: string | null = null
-    if (diasRestantes === 2) tipo = 'aviso_2d'
-    else if (diasRestantes === 1) tipo = 'aviso_1d'
-    else if (diasRestantes === 0) tipo = 'vencimiento'
-    else if (diasRestantes < 0) tipo = `atraso_${Math.abs(diasRestantes)}`
+    // forzar_tipo allows manual testing without waiting for the right day
+    let tipo: string | null = forzarTipo ?? null
+    if (!tipo) {
+      if (diasRestantes === 2) tipo = 'aviso_2d'
+      else if (diasRestantes === 1) tipo = 'aviso_1d'
+      else if (diasRestantes === 0) tipo = 'vencimiento'
+      else if (diasRestantes < 0) tipo = `atraso_${Math.abs(diasRestantes)}`
+    }
 
     if (!tipo) continue
 
-    // Check if already sent
+    // Check if already sent (skip dedup when forcing for tests)
     const key = `${contrato.id}:${tipo}`
-    if (enviados.has(key)) continue
+    if (!forzarTipo && enviados.has(key)) continue
 
     // Build message
     const montoTexto = propiedad.moneda === 'CLP'
@@ -140,21 +146,28 @@ export async function GET(request: NextRequest) {
     let mensaje = ''
 
     if (tipo === 'aviso_2d') {
-      mensaje = `Hola ${arrendatario.nombre} 👋\n\nTe recordamos que tu arriendo de *${propiedad.nombre}* vence en *2 días* (día ${propiedad.dia_vencimiento}).\n\n💰 Monto: ${montoTexto}\n\nRealiza tu pago a tiempo para evitar multas. ¡Gracias!`
+      mensaje = `Hola ${arrendatario.nombre}\n\nEn 2 días vence el plazo de pago de tu arriendo de *${propiedad.nombre}*.\n\n💰 Monto: ${montoTexto}\n\nRealiza tu pago a tiempo para evitar multas. ¡Gracias!`
     } else if (tipo === 'aviso_1d') {
-      mensaje = `Hola ${arrendatario.nombre} ⏰\n\n*Mañana vence* tu arriendo de *${propiedad.nombre}*.\n\n💰 Monto: ${montoTexto}\n\nNo olvides realizar el pago. ¡Gracias!`
+      mensaje = `Hola ${arrendatario.nombre}\n\nMañana vence el plazo de pago de tu arriendo de *${propiedad.nombre}*.\n\n💰 Monto: ${montoTexto}\n\nNo olvides realizar el pago. ¡Gracias!`
     } else if (tipo === 'vencimiento') {
-      mensaje = `Hola ${arrendatario.nombre} 📅\n\n*Hoy vence* tu arriendo de *${propiedad.nombre}*.\n\n💰 Monto: ${montoTexto}\n\nPor favor realiza el pago hoy para evitar multas. ¡Gracias!`
+      mensaje = `Hola ${arrendatario.nombre}\n\nHoy vence el plazo de pago de tu arriendo de *${propiedad.nombre}*.\n\n💰 Monto: ${montoTexto}\n\nRealiza el pago hoy para evitar multas. ¡Gracias!`
     } else if (tipo.startsWith('atraso_')) {
       const dias = Math.abs(diasRestantes)
       let multaTexto = ''
+      let totalTexto = ''
       if (propiedad.multa_monto) {
-        const multaCLP = propiedad.multa_moneda === 'CLP'
+        // Multa acumulada = multa_monto * días de atraso
+        const multaDiariaCLP = propiedad.multa_moneda === 'CLP'
           ? propiedad.multa_monto
           : propiedad.multa_monto * ufValue
-        multaTexto = `\n⚠️ Multa por atraso: ${formatCLPLocal(multaCLP)}`
+        const multaAcumuladaCLP = multaDiariaCLP * dias
+        const montoPrincipalCLP = propiedad.moneda === 'CLP'
+          ? propiedad.valor_uf
+          : propiedad.valor_uf * ufValue
+        multaTexto = `\n⚠️ Multa acumulada (${dias} día${dias > 1 ? 's' : ''}): ${formatCLPLocal(multaAcumuladaCLP)}`
+        totalTexto = `\n💳 *Total a pagar: ${formatCLPLocal(montoPrincipalCLP + multaAcumuladaCLP)}*`
       }
-      mensaje = `Hola ${arrendatario.nombre} 🔴\n\nTu arriendo de *${propiedad.nombre}* lleva *${dias} día${dias > 1 ? 's' : ''} de atraso*.\n\n💰 Monto: ${montoTexto}${multaTexto}\n\nPor favor regulariza tu situación lo antes posible. Contacta a tu arrendador si tienes dudas.`
+      mensaje = `Hola ${arrendatario.nombre}\n\nTu arriendo de *${propiedad.nombre}* lleva *${dias} día${dias > 1 ? 's' : ''} de atraso*.\n\n💰 Monto arriendo: ${montoTexto}${multaTexto}${totalTexto}\n\nPor favor regulariza tu situación lo antes posible.`
     }
 
     if (!mensaje) continue
