@@ -149,18 +149,21 @@ export default async function ArrendadorDashboard() {
           {propiedades.map((p: Propiedad) => {
             const contrato = (contratos ?? []).find((c: Contrato) => c.propiedad_id === p.id)
             const tienePago = contrato && pagosEsteMesSet.has(contrato.id)
+            const tieneInformal = !contrato && !!p.arrendatario_informal_nombre
 
             return (
               <Link key={p.id} href={`/arrendador/propiedades/${p.id}`}>
                 <Card className="hover:border-blue-300 transition-colors cursor-pointer h-full">
                   <div className="flex justify-between items-start mb-3">
                     <h3 className="font-semibold text-gray-900">{p.nombre}</h3>
-                    {!contrato ? (
-                      <Badge variant="gray">Disponible</Badge>
-                    ) : tienePago ? (
+                    {contrato && tienePago ? (
                       <Badge variant="green">Pagado</Badge>
-                    ) : (
+                    ) : contrato ? (
                       <Badge variant="yellow">Sin pago</Badge>
+                    ) : tieneInformal ? (
+                      <Badge variant="blue">Arrendada</Badge>
+                    ) : (
+                      <Badge variant="gray">Disponible</Badge>
                     )}
                   </div>
                   <p className="text-sm text-gray-500 mb-3">{p.direccion}</p>
@@ -170,6 +173,8 @@ export default async function ArrendadorDashboard() {
                   <p className="text-xs mt-2 flex items-center gap-1">
                     {contrato
                       ? <><span className="text-gray-400">Arrendatario:</span> <span className="text-gray-700 font-medium">{(contrato as Contrato & { profiles: { nombre: string } }).profiles?.nombre}</span></>
+                      : tieneInformal
+                      ? <><span className="text-gray-400">Arrendatario:</span> <span className="text-gray-700 font-medium">{p.arrendatario_informal_nombre}</span></>
                       : <span className="text-amber-500 italic">Sin arrendatario vinculado</span>
                     }
                   </p>

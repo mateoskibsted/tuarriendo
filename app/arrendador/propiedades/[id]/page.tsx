@@ -81,12 +81,18 @@ export default async function PropiedadPage({ params }: { params: Promise<{ id: 
           <div>
             <h3 className="text-base font-semibold text-gray-900">Arrendatario</h3>
             <p className="text-sm text-gray-500 mt-0.5">
-              {contrato ? 'Inquilino activo vinculado a esta propiedad' : 'Sin arrendatario activo'}
+              {contrato
+                ? 'Inquilino activo vinculado a esta propiedad'
+                : propiedad.arrendatario_informal_nombre
+                ? 'Arrendatario registrado manualmente'
+                : 'Sin arrendatario activo'}
             </p>
           </div>
-          {contrato && (
+          {contrato ? (
             <Badge variant="green">Activo</Badge>
-          )}
+          ) : propiedad.arrendatario_informal_nombre ? (
+            <Badge variant="blue">Arrendada</Badge>
+          ) : null}
         </div>
         <div className="p-6">
           {contrato && arrendatario ? (
