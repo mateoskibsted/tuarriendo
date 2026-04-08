@@ -47,6 +47,7 @@ export async function registro(formData: FormData) {
   const email = (formData.get('email') as string).trim()
   const password = formData.get('password') as string
   const role = formData.get('role') as Role
+  const telefono = (formData.get('telefono') as string | null)?.trim() || null
   const codigoInvitacion = formData.get('codigo_invitacion') as string | null
 
   if (!validateRut(rut)) {
@@ -115,6 +116,7 @@ export async function registro(formData: FormData) {
     nombre,
     email,
     role,
+    telefono,
   })
 
   if (profileError) {

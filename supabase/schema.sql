@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   rut TEXT UNIQUE NOT NULL,
   nombre TEXT NOT NULL,
   email TEXT,
+  telefono TEXT,
   role TEXT NOT NULL CHECK (role IN ('arrendador', 'arrendatario')),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -62,6 +63,18 @@ CREATE TABLE IF NOT EXISTS public.pagos (
   fecha_pago TIMESTAMPTZ,
   notas TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- WhatsApp notification log (prevents duplicate sends)
+CREATE TABLE IF NOT EXISTS public.notificaciones_log (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  contrato_id UUID REFERENCES public.contratos(id) ON DELETE CASCADE NOT NULL,
+  tipo TEXT NOT NULL,      -- aviso_2d, aviso_1d, vencimiento, atraso_1, atraso_2 ...
+  periodo TEXT NOT NULL,   -- YYYY-MM
+  mensaje TEXT,
+  exitosa BOOLEAN DEFAULT TRUE,
+  enviada_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(contrato_id, tipo, periodo)
 );
 
 -- Gmail connections for arrendadores

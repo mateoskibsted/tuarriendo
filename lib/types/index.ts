@@ -6,6 +6,7 @@ export interface Profile {
   rut: string
   nombre: string
   email?: string
+  telefono?: string
   role: Role
   created_at: string
 }

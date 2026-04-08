@@ -121,14 +121,24 @@ function RegistroForm() {
             />
 
             {role === 'arrendatario' && (
-              <Input
-                label="Código de invitación"
-                name="codigo_invitacion"
-                defaultValue={codigoUrl}
-                placeholder="Ej: ABC12345"
-                hint={codigoUrl ? 'Código recibido por WhatsApp' : 'Solicita este código a tu arrendador'}
-                required
-              />
+              <>
+                <Input
+                  label="Teléfono (WhatsApp)"
+                  name="telefono"
+                  type="tel"
+                  placeholder="+56 9 1234 5678"
+                  hint="Para recibir recordatorios de pago por WhatsApp"
+                  required
+                />
+                <Input
+                  label="Código de invitación"
+                  name="codigo_invitacion"
+                  defaultValue={codigoUrl}
+                  placeholder="Ej: ABC12345"
+                  hint={codigoUrl ? 'Código recibido por WhatsApp' : 'Solicita este código a tu arrendador'}
+                  required
+                />
+              </>
             )}
 
             {error && (
