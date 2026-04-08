@@ -4,11 +4,13 @@ import { enviarWhatsApp } from '@/lib/utils/twilio'
 import { getUFValue } from '@/lib/utils/uf'
 
 // Vercel cron passes Authorization: Bearer {CRON_SECRET}
+// Browser testing: GET /api/cron/notificaciones?secret=xxx
 function autenticado(request: NextRequest) {
   const secret = process.env.CRON_SECRET
   if (!secret) return true // allow if not configured (local dev)
-  const auth = request.headers.get('authorization')
-  return auth === `Bearer ${secret}`
+  const authHeader = request.headers.get('authorization')
+  const querySecret = request.nextUrl.searchParams.get('secret')
+  return authHeader === `Bearer ${secret}` || querySecret === secret
 }
 
 /** Days between two dates (positive = future, negative = past) */
