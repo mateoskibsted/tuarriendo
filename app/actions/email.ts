@@ -53,12 +53,15 @@ function extractAmounts(content: string): number[] {
     .filter(n => !isNaN(n) && n > 0)
 }
 
-/** Check if tenant name appears in email content (all words with 3+ chars must match) */
+/** Check if tenant name appears in email content.
+ *  Requires at least the first 2 significant words (nombre + primer apellido). */
 function nameMatchesContent(tenantName: string, content: string): boolean {
   const contentNorm = normalizeText(content)
   const words = normalizeText(tenantName).split(' ').filter(w => w.length >= 3)
   if (words.length === 0) return false
-  return words.every(word => contentNorm.includes(word))
+  // Require the first 2 words minimum (or all if there are fewer than 2)
+  const required = words.slice(0, 2)
+  return required.every(word => contentNorm.includes(word))
 }
 
 /** Rule-based matching: name + amount must both match */
