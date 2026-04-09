@@ -162,6 +162,9 @@ export default async function PropiedadPage({ params }: { params: Promise<{ id: 
           diaVencimiento={contrato.dia_pago}
           multaMonto={propiedad.multa_monto}
           multaMoneda={propiedad.multa_moneda}
+          fechaInicio={contrato.fecha_inicio}
+          fechaFin={contrato.fecha_fin}
+          moneda={propiedad.moneda}
         />
       ) : propiedad.arrendatario_informal_nombre ? (
         <PagosSection
@@ -171,6 +174,9 @@ export default async function PropiedadPage({ params }: { params: Promise<{ id: 
           diaVencimiento={propiedad.dia_vencimiento}
           multaMonto={propiedad.multa_monto}
           multaMoneda={propiedad.multa_moneda}
+          fechaInicio={propiedad.arrendatario_informal_fecha_inicio}
+          fechaFin={propiedad.arrendatario_informal_fecha_fin}
+          moneda={propiedad.moneda}
         />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
