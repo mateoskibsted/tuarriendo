@@ -130,10 +130,12 @@ Después de terminar cada tarea siempre ejecutar:
 - **Tablas adicionales en Supabase**: `notificaciones_log`, columna `telefono` en `profiles`
 
 ## Variables de entorno adicionales
+```
 TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
 TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
 CRON_SECRET=
+```
 
 ## Lógica del bot de WhatsApp
 - 2 días antes del vencimiento → recordatorio amable
