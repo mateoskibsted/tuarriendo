@@ -283,6 +283,45 @@ export async function actualizarTelefonoArrendatario(arrendatarioId: string, tel
   return { success: true }
 }
 
+export async function eliminarPago(pagoId: string) {
+  const { user, admin } = await getAuthContext()
+  if (!user) return { error: 'No autenticado' }
+
+  // Verify ownership via contrato or propiedad
+  const { data: pago } = await admin
+    .from('pagos')
+    .select('id, contrato_id, propiedad_id')
+    .eq('id', pagoId)
+    .single()
+
+  if (!pago) return { error: 'Pago no encontrado' }
+
+  if (pago.contrato_id) {
+    const { data: contrato } = await admin
+      .from('contratos')
+      .select('propiedades(arrendador_id)')
+      .eq('id', pago.contrato_id)
+      .single()
+    const arrendadorId = (contrato as unknown as { propiedades?: { arrendador_id: string } })?.propiedades?.arrendador_id
+    if (arrendadorId !== user.id) return { error: 'No autorizado' }
+  } else if (pago.propiedad_id) {
+    const { data: prop } = await admin
+      .from('propiedades')
+      .select('id')
+      .eq('id', pago.propiedad_id)
+      .eq('arrendador_id', user.id)
+      .single()
+    if (!prop) return { error: 'No autorizado' }
+  }
+
+  const { error } = await admin.from('pagos').delete().eq('id', pagoId)
+  if (error) return { error: error.message }
+
+  revalidatePath('/arrendador')
+  revalidatePath('/arrendador/propiedades')
+  return { success: true }
+}
+
 export async function registrarPagoInformal(propiedadId: string, formData: FormData) {
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }

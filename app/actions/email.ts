@@ -215,11 +215,29 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
 
   if (tenants.length === 0) return { sugerencias: [] }
 
+  // Exclude tenants that already have a confirmed payment this month
+  const periodoActual = new Date().toISOString().slice(0, 7)
+  const { data: pagosYaRegistrados } = await admin
+    .from('pagos')
+    .select('contrato_id, propiedad_id')
+    .eq('periodo', periodoActual)
+    .eq('estado', 'pagado')
+
+  const contratosPagados = new Set((pagosYaRegistrados ?? []).map((p: { contrato_id: string | null }) => p.contrato_id).filter(Boolean))
+  const propiedadesPagadas = new Set((pagosYaRegistrados ?? []).map((p: { propiedad_id: string | null }) => p.propiedad_id).filter(Boolean))
+
+  const tenantsSinPagar = tenants.filter(t =>
+    !(t.contratoId && contratosPagados.has(t.contratoId)) &&
+    !(t.propiedadId && propiedadesPagadas.has(t.propiedadId))
+  )
+
+  if (tenantsSinPagar.length === 0) return { sugerencias: [] }
+
   // Get current UF value for CLP conversion
   const ufValue = await getUFValue()
 
   // Convert all tenant amounts to CLP
-  const tenantsConCLP = tenants.map(t => ({
+  const tenantsConCLP = tenantsSinPagar.map(t => ({
     ...t,
     monto_clp: t.moneda === 'UF' ? Math.round(t.monto * ufValue) : t.monto,
     monto_original: t.monto,
@@ -253,7 +271,6 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
   if (messageList.length === 0) return { sugerencias: [] }
 
   // Fetch and parse each email
-  const periodoActual = new Date().toISOString().slice(0, 7)
   const parsedEmails: Array<{
     idx: number
     emailId: string

@@ -20,7 +20,6 @@ export default function PagosDetectadosAuto() {
   const [estado, setEstado] = useState<'cargando' | 'listo' | 'error'>('cargando')
   const [sugerencias, setSugerencias] = useState<PagoSugerido[]>([])
   const [confirming, setConfirming] = useState<string | null>(null)
-  const [confirmed, setConfirmed] = useState<Set<string>>(new Set())
   const [errorMsg, setErrorMsg] = useState('')
   const [montos, setMontos] = useState<Record<string, string>>({})
 
@@ -47,13 +46,13 @@ export default function PagosDetectadosAuto() {
     if (result.error) {
       alert(result.error)
     } else {
-      setConfirmed(prev => new Set([...prev, s.emailId]))
+      setSugerencias(prev => prev.filter(x => x.emailId !== s.emailId))
       router.refresh()
     }
   }
 
-  const pendientes = sugerencias.filter(s => !confirmed.has(s.emailId) && (!!s.contrato_id || !!s.propiedad_id))
-  const sinMatch = sugerencias.filter(s => !confirmed.has(s.emailId) && !s.contrato_id && !s.propiedad_id)
+  const pendientes = sugerencias.filter(s => !!s.contrato_id || !!s.propiedad_id)
+  const sinMatch = sugerencias.filter(s => !s.contrato_id && !s.propiedad_id)
 
   if (estado === 'cargando') {
     return (
@@ -134,17 +133,13 @@ export default function PagosDetectadosAuto() {
                     </a>
                   </div>
                 </div>
-                {confirmed.has(s.emailId) ? (
-                  <span className="text-green-600 text-sm font-medium shrink-0">Registrado</span>
-                ) : (
-                  <button
-                    onClick={() => handleConfirmar(s)}
-                    disabled={confirming === s.emailId || (!s.monto_clp && !montos[s.emailId])}
-                    className="shrink-0 text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors"
-                  >
-                    {confirming === s.emailId ? 'Registrando...' : 'Confirmar pago'}
-                  </button>
-                )}
+                <button
+                  onClick={() => handleConfirmar(s)}
+                  disabled={confirming === s.emailId || (!s.monto_clp && !montos[s.emailId])}
+                  className="shrink-0 text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors"
+                >
+                  {confirming === s.emailId ? 'Registrando...' : 'Confirmar pago'}
+                </button>
               </div>
             )})}
           </div>

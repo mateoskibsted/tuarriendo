@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { registrarPago, registrarPagoInformal } from '@/app/actions/arrendador'
+import { registrarPago, registrarPagoInformal, eliminarPago } from '@/app/actions/arrendador'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
@@ -27,6 +27,7 @@ export default function PagosSection({
   pagos: Pago[]
 }) {
   const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [isPending, startTransition] = useTransition()
 
@@ -114,40 +115,74 @@ export default function PagosSection({
         {pagos.length === 0 ? (
           <p className="text-sm text-gray-500 text-center py-4">Sin pagos registrados</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="text-left py-2 font-medium text-gray-500">Período</th>
-                  <th className="text-right py-2 font-medium text-gray-500">UF</th>
-                  <th className="text-right py-2 font-medium text-gray-500">CLP</th>
-                  <th className="text-center py-2 font-medium text-gray-500">Estado</th>
-                  <th className="text-right py-2 font-medium text-gray-500">Fecha pago</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pagos.map((pago) => {
-                  const badge = estadoBadge[pago.estado]
-                  return (
-                    <tr key={pago.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2.5 font-mono text-gray-700">{pago.periodo}</td>
-                      <td className="py-2.5 text-right font-medium">{formatUF(pago.valor_uf)}</td>
-                      <td className="py-2.5 text-right text-gray-500">
-                        {pago.valor_clp ? formatCLP(pago.valor_clp) : '—'}
-                      </td>
-                      <td className="py-2.5 text-center">
-                        <Badge variant={badge.variant}>{badge.label}</Badge>
-                      </td>
-                      <td className="py-2.5 text-right text-gray-500">
-                        {pago.fecha_pago
-                          ? new Date(pago.fecha_pago).toLocaleDateString('es-CL')
-                          : '—'}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+          <div className="space-y-1">
+            {pagos.map((pago) => {
+              const badge = estadoBadge[pago.estado]
+              const isEditing = editingId === pago.id
+
+              if (isEditing) {
+                return (
+                  <form
+                    key={pago.id}
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      const fd = new FormData(e.currentTarget)
+                      startTransition(async () => {
+                        const result = contratoId
+                          ? await registrarPago(contratoId, fd)
+                          : await registrarPagoInformal(propiedadId!, fd)
+                        if (result?.error) setError(result.error)
+                        else setEditingId(null)
+                      })
+                    }}
+                    className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2"
+                  >
+                    <input type="hidden" name="periodo" value={pago.periodo} />
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input label="UF" name="valor_uf" type="number" step="0.01" defaultValue={pago.valor_uf} required />
+                      <Input label="CLP" name="valor_clp" type="number" defaultValue={pago.valor_clp ?? ''} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Estado</label>
+                        <select name="estado" defaultValue={pago.estado} className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm">
+                          <option value="pagado">Pagado</option>
+                          <option value="pendiente">Pendiente</option>
+                          <option value="atrasado">Atrasado</option>
+                        </select>
+                      </div>
+                      <Input label="Notas" name="notas" defaultValue={pago.notas ?? ''} />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button type="submit" size="sm" loading={isPending}>Guardar</Button>
+                      <button type="button" onClick={() => setEditingId(null)} className="text-sm text-gray-500 hover:text-gray-700 px-2">Cancelar</button>
+                    </div>
+                  </form>
+                )
+              }
+
+              return (
+                <div key={pago.id} className="flex items-center gap-2 py-2 border-b border-gray-50 hover:bg-gray-50 rounded px-1 group">
+                  <span className="font-mono text-sm text-gray-700 w-20 shrink-0">{pago.periodo}</span>
+                  <span className="text-sm font-medium w-16 text-right shrink-0">{formatUF(pago.valor_uf)}</span>
+                  <span className="text-sm text-gray-500 w-28 text-right shrink-0">{pago.valor_clp ? formatCLP(pago.valor_clp) : '—'}</span>
+                  <span className="flex-1"><Badge variant={badge.variant}>{badge.label}</Badge></span>
+                  <span className="text-sm text-gray-400 shrink-0">{pago.fecha_pago ? new Date(pago.fecha_pago).toLocaleDateString('es-CL') : '—'}</span>
+                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                    <button onClick={() => setEditingId(pago.id)} className="text-xs text-blue-500 hover:underline">Editar</button>
+                    <button
+                      onClick={() => {
+                        if (!confirm('¿Eliminar este pago?')) return
+                        startTransition(async () => { await eliminarPago(pago.id) })
+                      }}
+                      className="text-xs text-red-400 hover:underline"
+                    >
+                      Eliminar
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
