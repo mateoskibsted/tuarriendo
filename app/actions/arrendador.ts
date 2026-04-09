@@ -294,8 +294,8 @@ export async function guardarArrendatarioInformal(propiedadId: string, formData:
       `Tu arrendador te ha registrado como arrendatario de *${propiedadNombre}*.\n\n` +
       `A partir de ahora podrías recibir recordatorios de pago de arriendo por WhatsApp.\n\n` +
       `¿Estás de acuerdo?\n` +
-      `✅ Responde *SI* para confirmar\n` +
-      `❌ Responde *NO* para rechazar`
+      `✅ Responde *Si* para confirmar\n` +
+      `❌ Responde *No* para rechazar`
     await enviarWhatsApp(celularNorm, mensaje)
   }
 

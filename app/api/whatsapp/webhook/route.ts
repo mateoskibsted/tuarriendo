@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
       phoneMatch(p.arrendatario_informal_celular as string ?? '', fromRaw)
     )
 
-    if (!propiedad) return emptyTwiml()
+    if (!propiedad) return twiml('Numero no registrado en el sistema. Contacta a tu arrendador.')
 
     const nombre = (propiedad.arrendatario_informal_nombre as string | null) ?? 'arrendatario'
     const dia = (propiedad.dia_vencimiento as number | null) ?? 5
