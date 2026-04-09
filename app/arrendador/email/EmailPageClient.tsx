@@ -51,7 +51,7 @@ export default function EmailPageClient({
   async function handleConfirmar(s: PagoSugerido) {
     if (!s.contrato_id || !s.monto_clp) return
     setConfirming(s.emailId)
-    const result = await confirmarPagoEmail(s.contrato_id, s.monto_clp, s.periodo)
+    const result = await confirmarPagoEmail(s.contrato_id, s.monto_clp, s.periodo, s.emailId, s.fecha)
     setConfirming(null)
     if (result.error) {
       alert(result.error)

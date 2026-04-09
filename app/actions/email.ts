@@ -35,6 +35,38 @@ function buildOAuthClient(connection: {
   return oauth2Client
 }
 
+const MESES_ES: Record<string, number> = {
+  ene: 0, feb: 1, mar: 2, abr: 3, may: 4, jun: 5,
+  jul: 6, ago: 7, sep: 8, oct: 9, nov: 10, dic: 11,
+}
+
+/**
+ * Try to extract the exact transfer datetime from an email body.
+ * Banks like BICE include "9 abr 2026 - 14:46 h" in the body.
+ * Returns an ISO string in UTC. Falls back to the email Date header.
+ */
+function extractTransferDateISO(rawContent: string, emailDateHeader: string): string {
+  // Pattern: "9 abr 2026 - 14:46" or "9 abr 2026 14:46"
+  const m = rawContent.match(
+    /(\d{1,2})\s+(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)\s+(\d{4})\s*[-–]?\s*(\d{1,2}):(\d{2})/i
+  )
+  if (m) {
+    const day = parseInt(m[1])
+    const month = MESES_ES[m[2].toLowerCase()]
+    const year = parseInt(m[3])
+    const hour = parseInt(m[4])
+    const min = parseInt(m[5])
+    if (month !== undefined) {
+      // Chile is UTC-4 permanently since 2024
+      const utcMs = Date.UTC(year, month, day, hour + 4, min, 0)
+      return new Date(utcMs).toISOString()
+    }
+  }
+  // Fallback: use the email Date header (RFC 2822, handles timezone automatically)
+  const d = new Date(emailDateHeader)
+  return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString()
+}
+
 /** Normalize text: lowercase, remove accents and punctuation */
 function normalizeText(text: string): string {
   return text
@@ -310,7 +342,7 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
         idx: parsedEmails.length + 1,
         emailId: msg.id,
         asunto: subject,
-        fecha: dateHeader,
+        fecha: extractTransferDateISO(rawContent, dateHeader),
         rawContent,
       })
     } catch {
@@ -352,13 +384,14 @@ export async function confirmarPagoEmail(
   montoCLP: number,
   periodo: string,
   emailId?: string,
+  emailFecha?: string,
 ) {
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }
 
   const { data: contrato } = await admin
     .from('contratos')
-    .select('id, propiedad_id, dia_pago, propiedades(arrendador_id, multa_monto, multa_moneda)')
+    .select('id, propiedad_id, dia_pago, valor_uf, propiedades(arrendador_id, valor_uf, moneda, multa_monto, multa_moneda)')
     .eq('id', contratoId)
     .single()
 
@@ -367,31 +400,43 @@ export async function confirmarPagoEmail(
 
   if (!contrato || arrendadorId !== user.id) return { error: 'No autorizado' }
 
-  // Detect atraso using dia_pago from contrato
-  let estado = 'pagado'
-  let notas = 'Registrado automáticamente desde correo'
   const diaPago = (contrato as unknown as { dia_pago?: number }).dia_pago
-  const propiedadData = (contrato as unknown as { propiedades?: { multa_monto?: number | null; multa_moneda?: string | null } }).propiedades
+  const propiedadData = (contrato as unknown as {
+    propiedades?: { valor_uf?: number | null; moneda?: string | null; multa_monto?: number | null; multa_moneda?: string | null }
+  }).propiedades
+
+  // Base amount in CLP
+  const ufValue = await getUFValue()
+  const moneda = propiedadData?.moneda ?? 'UF'
+  const valorBase = propiedadData?.valor_uf ?? 0
+  const montoBaseCLP = moneda === 'CLP' ? valorBase : Math.round(valorBase * ufValue)
+
+  // Atraso calculation
+  let diasAtraso = 0
+  let multaTotal = 0
   if (diaPago) {
     const [year, month] = periodo.split('-').map(Number)
     const fechaVencimiento = new Date(year, month - 1, diaPago)
-    const hoy = new Date()
-    hoy.setHours(0, 0, 0, 0)
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
     if (hoy > fechaVencimiento) {
-      const diasAtraso = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / (24 * 60 * 60 * 1000))
-      estado = 'atrasado'
-      if (propiedadData?.multa_monto && diasAtraso > 0) {
-        const multaTotal = diasAtraso * propiedadData.multa_monto
-        const moneda = propiedadData.multa_moneda ?? 'CLP'
-        const multaStr = moneda === 'CLP'
-          ? `$${multaTotal.toLocaleString('es-CL')} CLP`
-          : `${multaTotal} ${moneda}`
-        notas = `Registrado desde correo. Pago con ${diasAtraso} día(s) de atraso. Multa: ${multaStr}`
-      } else {
-        notas = `Registrado desde correo. Pago con ${diasAtraso} día(s) de atraso`
-      }
+      diasAtraso = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / 86400000)
+      multaTotal = propiedadData?.multa_monto ? diasAtraso * propiedadData.multa_monto : 0
     }
   }
+
+  // Build notas based on amount received vs expected
+  const faltanteBase = montoBaseCLP > 0 ? montoBaseCLP - montoCLP : 0
+  const notasParts: string[] = [`Monto recibido: $${montoCLP.toLocaleString('es-CL')} CLP`]
+  if (faltanteBase > 0) notasParts.push(`Faltan $${faltanteBase.toLocaleString('es-CL')} del monto base`)
+  if (diasAtraso > 0) notasParts.push(`${diasAtraso} día(s) de atraso`)
+  if (multaTotal > 0) {
+    const monedaMulta = propiedadData?.multa_moneda ?? 'CLP'
+    notasParts.push(`Multa pendiente: $${multaTotal.toLocaleString('es-CL')} ${monedaMulta}`)
+  }
+  const notas = notasParts.join('. ')
+
+  // Estado: always 'pagado' if transfer was received; 'atrasado' only if there's no payment at all
+  const estado = diasAtraso > 0 ? 'atrasado' : 'pagado'
 
   const { data: existing } = await admin
     .from('pagos')
@@ -400,13 +445,15 @@ export async function confirmarPagoEmail(
     .eq('periodo', periodo)
     .maybeSingle()
 
+  const fechaPago = emailFecha ? new Date(emailFecha).toISOString() : new Date().toISOString()
+
   const payload = {
     contrato_id: contratoId,
     periodo,
-    valor_uf: 0,
+    valor_uf: moneda !== 'CLP' ? valorBase : 0,
     valor_clp: montoCLP,
     estado,
-    fecha_pago: new Date().toISOString(),
+    fecha_pago: fechaPago,
     notas,
     email_origen: emailId ? `https://mail.google.com/mail/u/0/#all/${emailId}` : null,
   }
@@ -442,43 +489,51 @@ export async function confirmarPagoEmailInformal(
   montoCLP: number,
   periodo: string,
   emailId?: string,
+  emailFecha?: string,
 ) {
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }
 
-  // Verify ownership and fetch fine config
   const { data: propiedad } = await admin
     .from('propiedades')
-    .select('id, dia_vencimiento, multa_monto, multa_moneda')
+    .select('id, valor_uf, moneda, dia_vencimiento, multa_monto, multa_moneda')
     .eq('id', propiedadId)
     .eq('arrendador_id', user.id)
     .single()
 
   if (!propiedad) return { error: 'No autorizado' }
 
-  // Detect atraso
-  let estado = 'pagado'
-  let notas = 'Registrado automáticamente desde correo'
+  // Base amount in CLP
+  const ufValue = await getUFValue()
+  const moneda = propiedad.moneda ?? 'UF'
+  const valorBase = propiedad.valor_uf ?? 0
+  const montoBaseCLP = moneda === 'CLP' ? valorBase : Math.round(valorBase * ufValue)
+
+  // Atraso calculation
+  let diasAtraso = 0
+  let multaTotal = 0
   if (propiedad.dia_vencimiento) {
     const [year, month] = periodo.split('-').map(Number)
     const fechaVencimiento = new Date(year, month - 1, propiedad.dia_vencimiento)
-    const hoy = new Date()
-    hoy.setHours(0, 0, 0, 0)
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
     if (hoy > fechaVencimiento) {
-      const diasAtraso = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / (24 * 60 * 60 * 1000))
-      estado = 'atrasado'
-      if (propiedad.multa_monto && diasAtraso > 0) {
-        const multaTotal = diasAtraso * propiedad.multa_monto
-        const moneda = propiedad.multa_moneda ?? 'CLP'
-        const multaStr = moneda === 'CLP'
-          ? `$${multaTotal.toLocaleString('es-CL')} CLP`
-          : `${multaTotal} ${moneda}`
-        notas = `Registrado desde correo. Pago con ${diasAtraso} día(s) de atraso. Multa: ${multaStr}`
-      } else {
-        notas = `Registrado desde correo. Pago con ${diasAtraso} día(s) de atraso`
-      }
+      diasAtraso = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / 86400000)
+      multaTotal = propiedad.multa_monto ? diasAtraso * propiedad.multa_monto : 0
     }
   }
+
+  // Build notas based on amount received vs expected
+  const faltanteBase = montoBaseCLP > 0 ? montoBaseCLP - montoCLP : 0
+  const notasParts: string[] = [`Monto recibido: $${montoCLP.toLocaleString('es-CL')} CLP`]
+  if (faltanteBase > 0) notasParts.push(`Faltan $${faltanteBase.toLocaleString('es-CL')} del monto base`)
+  if (diasAtraso > 0) notasParts.push(`${diasAtraso} día(s) de atraso`)
+  if (multaTotal > 0) {
+    const monedaMulta = propiedad.multa_moneda ?? 'CLP'
+    notasParts.push(`Multa pendiente: $${multaTotal.toLocaleString('es-CL')} ${monedaMulta}`)
+  }
+  const notas = notasParts.join('. ')
+
+  const estado = diasAtraso > 0 ? 'atrasado' : 'pagado'
 
   const { data: existing } = await admin
     .from('pagos')
@@ -487,14 +542,16 @@ export async function confirmarPagoEmailInformal(
     .eq('periodo', periodo)
     .maybeSingle()
 
+  const fechaPago = emailFecha ? new Date(emailFecha).toISOString() : new Date().toISOString()
+
   const payload = {
     propiedad_id: propiedadId,
     contrato_id: null,
     periodo,
-    valor_uf: 0,
+    valor_uf: moneda !== 'CLP' ? valorBase : 0,
     valor_clp: montoCLP,
     estado,
-    fecha_pago: new Date().toISOString(),
+    fecha_pago: fechaPago,
     notas,
     email_origen: emailId ? `https://mail.google.com/mail/u/0/#all/${emailId}` : null,
   }

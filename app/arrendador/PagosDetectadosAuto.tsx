@@ -40,8 +40,8 @@ export default function PagosDetectadosAuto() {
     if (!monto) return
     setConfirming(s.emailId)
     const result = s.contrato_id
-      ? await confirmarPagoEmail(s.contrato_id, monto, s.periodo, s.emailId)
-      : await confirmarPagoEmailInformal(s.propiedad_id!, monto, s.periodo, s.emailId)
+      ? await confirmarPagoEmail(s.contrato_id, monto, s.periodo, s.emailId, s.fecha)
+      : await confirmarPagoEmailInformal(s.propiedad_id!, monto, s.periodo, s.emailId, s.fecha)
     setConfirming(null)
     if (result.error) {
       alert(result.error)
