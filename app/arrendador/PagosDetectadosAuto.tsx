@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { escanearEmails, confirmarPagoEmail } from '@/app/actions/email'
+import { escanearEmails, confirmarPagoEmail, confirmarPagoEmailInformal } from '@/app/actions/email'
 import type { PagoSugerido } from '@/lib/types'
 
 function formatCLPLocal(n: number) {
@@ -37,20 +37,22 @@ export default function PagosDetectadosAuto() {
   }, [])
 
   async function handleConfirmar(s: PagoSugerido) {
-    if (!s.contrato_id || !s.monto_clp) return
+    if (!s.monto_clp) return
     setConfirming(s.emailId)
-    const result = await confirmarPagoEmail(s.contrato_id, s.monto_clp, s.periodo)
+    const result = s.contrato_id
+      ? await confirmarPagoEmail(s.contrato_id, s.monto_clp, s.periodo)
+      : await confirmarPagoEmailInformal(s.propiedad_id!, s.monto_clp, s.periodo)
     setConfirming(null)
     if (result.error) {
       alert(result.error)
     } else {
       setConfirmed(prev => new Set([...prev, s.emailId]))
-      router.refresh() // Update property cards to show paid status
+      router.refresh()
     }
   }
 
-  const pendientes = sugerencias.filter(s => !confirmed.has(s.emailId) && !!s.contrato_id)
-  const sinMatch = sugerencias.filter(s => !confirmed.has(s.emailId) && !s.contrato_id)
+  const pendientes = sugerencias.filter(s => !confirmed.has(s.emailId) && (!!s.contrato_id || !!s.propiedad_id))
+  const sinMatch = sugerencias.filter(s => !confirmed.has(s.emailId) && !s.contrato_id && !s.propiedad_id)
 
   if (estado === 'cargando') {
     return (

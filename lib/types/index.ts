@@ -58,7 +58,8 @@ export interface Contrato {
 
 export interface Pago {
   id: string
-  contrato_id: string
+  contrato_id?: string | null
+  propiedad_id?: string | null
   periodo: string
   valor_uf: number
   valor_clp?: number
@@ -85,6 +86,7 @@ export interface PagoSugerido {
   nombre_detectado?: string
   banco?: string
   contrato_id?: string
+  propiedad_id?: string
   arrendatario_nombre?: string
   propiedad_nombre?: string
   confianza: 'alta' | 'media' | 'baja'

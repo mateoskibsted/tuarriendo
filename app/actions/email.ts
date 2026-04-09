@@ -156,30 +156,61 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
   const propiedadIds = (propiedades ?? []).map((p: { id: string }) => p.id)
   if (propiedadIds.length === 0) return { sugerencias: [] }
 
-  // Load active contracts with tenant info
+  // Load active formal contracts with tenant info
   const { data: contratos } = await admin
     .from('contratos')
     .select('id, propiedad_id, propiedades(nombre, valor_uf, moneda), profiles!contratos_arrendatario_id_fkey(nombre, rut)')
     .in('propiedad_id', propiedadIds)
     .eq('activo', true)
 
-  // No tenants = nothing to match against
-  if (!contratos || contratos.length === 0) return { sugerencias: [] }
+  // Load propiedades with informal arrendatarios
+  const { data: propiedadesInformales } = await admin
+    .from('propiedades')
+    .select('id, nombre, valor_uf, moneda, arrendatario_informal_nombre, arrendatario_informal_rut')
+    .in('id', propiedadIds)
+    .eq('activa', true)
+    .not('arrendatario_informal_nombre', 'is', null)
 
-  // Build tenant list for AI
-  const tenants = contratos.map((c, idx) => {
+  // Build tenant list for AI (formal + informal)
+  const tenants: Array<{
+    idx: number
+    contratoId?: string
+    propiedadId?: string
+    nombre: string
+    rut: string
+    propiedadNombre: string
+    monto: number
+    moneda: string
+  }> = []
+
+  let idx = 1
+  for (const c of contratos ?? []) {
     const profile = (c as unknown as { profiles?: { nombre: string; rut: string } }).profiles
     const propiedad = (c as unknown as { propiedades?: { nombre: string; valor_uf: number; moneda: string } }).propiedades
-    return {
-      idx: idx + 1,
+    if (!profile?.nombre) continue
+    tenants.push({
+      idx: idx++,
       contratoId: c.id,
-      nombre: profile?.nombre ?? '',
-      rut: profile?.rut ?? '',
+      nombre: profile.nombre,
+      rut: profile.rut ?? '',
       propiedadNombre: propiedad?.nombre ?? '',
       monto: propiedad?.valor_uf ?? 0,
       moneda: propiedad?.moneda ?? 'UF',
-    }
-  }).filter(t => t.nombre)
+    })
+  }
+
+  for (const p of propiedadesInformales ?? []) {
+    if (!p.arrendatario_informal_nombre) continue
+    tenants.push({
+      idx: idx++,
+      propiedadId: p.id,
+      nombre: p.arrendatario_informal_nombre,
+      rut: p.arrendatario_informal_rut ?? '',
+      propiedadNombre: p.nombre,
+      monto: p.valor_uf ?? 0,
+      moneda: p.moneda ?? 'UF',
+    })
+  }
 
   if (tenants.length === 0) return { sugerencias: [] }
 
@@ -269,6 +300,7 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
       nombre_detectado: email.nombre_detectado,
       banco: email.banco,
       contrato_id: tenant.contratoId,
+      propiedad_id: tenant.propiedadId,
       arrendatario_nombre: tenant.nombre,
       propiedad_nombre: tenant.propiedadNombre,
       confianza: match.confianza,
@@ -326,5 +358,52 @@ export async function confirmarPagoEmail(
 
   revalidatePath('/arrendador')
   revalidatePath('/arrendador/email')
+  return { success: true }
+}
+
+export async function confirmarPagoEmailInformal(
+  propiedadId: string,
+  montoCLP: number,
+  periodo: string,
+) {
+  const { user, admin } = await getAuthContext()
+  if (!user) return { error: 'No autenticado' }
+
+  // Verify ownership
+  const { data: propiedad } = await admin
+    .from('propiedades')
+    .select('id')
+    .eq('id', propiedadId)
+    .eq('arrendador_id', user.id)
+    .single()
+
+  if (!propiedad) return { error: 'No autorizado' }
+
+  const { data: existing } = await admin
+    .from('pagos')
+    .select('id')
+    .eq('propiedad_id', propiedadId)
+    .eq('periodo', periodo)
+    .maybeSingle()
+
+  const payload = {
+    propiedad_id: propiedadId,
+    contrato_id: null,
+    periodo,
+    valor_uf: 0,
+    valor_clp: montoCLP,
+    estado: 'pagado',
+    fecha_pago: new Date().toISOString(),
+    notas: 'Registrado automáticamente desde correo',
+  }
+
+  if (existing) {
+    await admin.from('pagos').update(payload).eq('id', existing.id)
+  } else {
+    await admin.from('pagos').insert(payload)
+  }
+
+  revalidatePath('/arrendador')
+  revalidatePath(`/arrendador/propiedades/${propiedadId}`)
   return { success: true }
 }

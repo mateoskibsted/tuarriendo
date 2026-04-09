@@ -283,6 +283,60 @@ export async function actualizarTelefonoArrendatario(arrendatarioId: string, tel
   return { success: true }
 }
 
+export async function registrarPagoInformal(propiedadId: string, formData: FormData) {
+  const { user, admin } = await getAuthContext()
+  if (!user) return { error: 'No autenticado' }
+
+  const { data: propiedad } = await admin
+    .from('propiedades')
+    .select('id')
+    .eq('id', propiedadId)
+    .eq('arrendador_id', user.id)
+    .single()
+
+  if (!propiedad) return { error: 'No autorizado' }
+
+  const periodo = formData.get('periodo') as string
+  const valorUf = parseFloat(formData.get('valor_uf') as string)
+  const valorClp = formData.get('valor_clp') ? parseInt(formData.get('valor_clp') as string) : null
+  const estado = formData.get('estado') as string
+  const notas = formData.get('notas') as string
+
+  const { data: existing } = await admin
+    .from('pagos')
+    .select('id')
+    .eq('propiedad_id', propiedadId)
+    .eq('periodo', periodo)
+    .maybeSingle()
+
+  if (existing) {
+    const { error } = await admin.from('pagos').update({
+      valor_uf: valorUf,
+      valor_clp: valorClp,
+      estado,
+      notas,
+      fecha_pago: estado === 'pagado' ? new Date().toISOString() : null,
+    }).eq('id', existing.id)
+    if (error) return { error: error.message }
+  } else {
+    const { error } = await admin.from('pagos').insert({
+      propiedad_id: propiedadId,
+      contrato_id: null,
+      periodo,
+      valor_uf: valorUf,
+      valor_clp: valorClp,
+      estado,
+      notas,
+      fecha_pago: estado === 'pagado' ? new Date().toISOString() : null,
+    })
+    if (error) return { error: error.message }
+  }
+
+  revalidatePath(`/arrendador/propiedades/${propiedadId}`)
+  revalidatePath('/arrendador')
+  return { success: true }
+}
+
 export async function desvincularArrendatario(contratoId: string) {
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }

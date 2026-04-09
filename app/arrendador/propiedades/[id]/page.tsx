@@ -51,6 +51,13 @@ export default async function PropiedadPage({ params }: { params: Promise<{ id: 
         .eq('contrato_id', contrato.id)
         .order('periodo', { ascending: false })
         .limit(24)
+    : propiedad.arrendatario_informal_nombre
+    ? await admin
+        .from('pagos')
+        .select('*')
+        .eq('propiedad_id', id)
+        .order('periodo', { ascending: false })
+        .limit(24)
     : { data: [] }
 
   const arrendatario = contrato
@@ -147,6 +154,12 @@ export default async function PropiedadPage({ params }: { params: Promise<{ id: 
         <PagosSection
           contratoId={contrato.id}
           valorUf={contrato.valor_uf}
+          pagos={(pagos as Pago[]) ?? []}
+        />
+      ) : propiedad.arrendatario_informal_nombre ? (
+        <PagosSection
+          propiedadId={id}
+          valorUf={propiedad.valor_uf}
           pagos={(pagos as Pago[]) ?? []}
         />
       ) : (

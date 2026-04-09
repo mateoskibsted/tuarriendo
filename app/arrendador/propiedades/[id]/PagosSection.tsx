@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { registrarPago } from '@/app/actions/arrendador'
+import { registrarPago, registrarPagoInformal } from '@/app/actions/arrendador'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
@@ -17,10 +17,12 @@ const estadoBadge: Record<EstadoPago, { label: string; variant: 'green' | 'red' 
 
 export default function PagosSection({
   contratoId,
+  propiedadId,
   valorUf,
   pagos,
 }: {
-  contratoId: string
+  contratoId?: string
+  propiedadId?: string
   valorUf: number
   pagos: Pago[]
 }) {
@@ -28,7 +30,6 @@ export default function PagosSection({
   const [error, setError] = useState('')
   const [isPending, startTransition] = useTransition()
 
-  // Generate current month as default
   const now = new Date()
   const currentPeriodo = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 
@@ -38,7 +39,9 @@ export default function PagosSection({
     const formData = new FormData(e.currentTarget)
 
     startTransition(async () => {
-      const result = await registrarPago(contratoId, formData)
+      const result = contratoId
+        ? await registrarPago(contratoId, formData)
+        : await registrarPagoInformal(propiedadId!, formData)
       if (result?.error) {
         setError(result.error)
       } else {
