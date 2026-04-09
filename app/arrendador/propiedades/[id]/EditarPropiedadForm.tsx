@@ -3,7 +3,6 @@
 import { useState, useTransition } from 'react'
 import { actualizarPropiedad } from '@/app/actions/arrendador'
 import Button from '@/components/ui/Button'
-import { formatUF, formatCLP } from '@/lib/utils/uf'
 import type { Propiedad } from '@/lib/types'
 import CamposPropiedad from '../CamposPropiedad'
 
@@ -23,10 +22,6 @@ export default function EditarPropiedadForm({ propiedad }: { propiedad: Propieda
     })
   }
 
-  const valorFormateado = propiedad.moneda === 'CLP'
-    ? formatCLP(propiedad.valor_uf)
-    : `${formatUF(propiedad.valor_uf)} UF`
-
   if (!editing) {
     return (
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
@@ -40,25 +35,6 @@ export default function EditarPropiedadForm({ propiedad }: { propiedad: Propieda
             <p className="text-sm font-medium text-gray-900">{propiedad.nombre}</p>
           </div>
           <div>
-            <p className="text-xs text-gray-500 mb-0.5">Valor mensual</p>
-            <p className="text-sm font-bold text-blue-700">{valorFormateado}</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 mb-0.5">Vencimiento</p>
-            <p className="text-sm font-medium text-gray-900">Día {propiedad.dia_vencimiento ?? 5} de cada mes</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 mb-0.5">Multa por atraso</p>
-            <p className="text-sm font-medium text-gray-900">
-              {propiedad.multa_monto
-                ? propiedad.multa_moneda === 'CLP'
-                  ? formatCLP(propiedad.multa_monto)
-                  : `${formatUF(propiedad.multa_monto)} UF`
-                : 'Sin multa'
-              }
-            </p>
-          </div>
-          <div className="col-span-2">
             <p className="text-xs text-gray-500 mb-0.5">Dirección</p>
             <p className="text-sm font-medium text-gray-900">{propiedad.direccion}</p>
           </div>
@@ -79,7 +55,7 @@ export default function EditarPropiedadForm({ propiedad }: { propiedad: Propieda
         <h3 className="text-base font-semibold text-gray-900">Editar propiedad</h3>
       </div>
       <form onSubmit={handleSubmit} className="p-6">
-        <CamposPropiedad propiedad={propiedad} />
+        <CamposPropiedad propiedad={propiedad} soloBasico />
         {error && <p className="text-sm text-red-600 mt-4">{error}</p>}
         <div className="flex gap-2 mt-5">
           <Button type="button" variant="secondary" size="sm" onClick={() => setEditing(false)}>Cancelar</Button>

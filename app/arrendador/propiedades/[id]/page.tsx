@@ -120,9 +120,16 @@ export default async function PropiedadPage({ params }: { params: Promise<{ id: 
           ) : (
             <div className="space-y-4">
               <MarcarArrendadaSection
-                propiedadId={id}
-                nombreActual={propiedad.arrendatario_informal_nombre}
-                celularActual={propiedad.arrendatario_informal_celular}
+                id={id}
+                valor_uf={propiedad.valor_uf}
+                moneda={propiedad.moneda}
+                dia_vencimiento={propiedad.dia_vencimiento}
+                multa_monto={propiedad.multa_monto}
+                multa_moneda={propiedad.multa_moneda}
+                arrendatario_informal_nombre={propiedad.arrendatario_informal_nombre}
+                arrendatario_informal_rut={propiedad.arrendatario_informal_rut}
+                arrendatario_informal_email={propiedad.arrendatario_informal_email}
+                arrendatario_informal_celular={propiedad.arrendatario_informal_celular}
               />
               <div className="border-t border-gray-100 pt-4">
                 <p className="text-sm text-gray-600 mb-3">

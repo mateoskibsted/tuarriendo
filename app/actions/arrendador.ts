@@ -194,15 +194,24 @@ export async function eliminarPropiedad(propiedadId: string) {
   return { success: true }
 }
 
-export async function guardarArrendatarioInformal(propiedadId: string, nombre: string, celular: string) {
+export async function guardarArrendatarioInformal(propiedadId: string, formData: FormData) {
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }
+
+  const multaMonto = formData.get('multa_monto') as string
 
   const { error } = await admin
     .from('propiedades')
     .update({
-      arrendatario_informal_nombre: nombre,
-      arrendatario_informal_celular: celular || null,
+      arrendatario_informal_nombre: (formData.get('nombre') as string).trim(),
+      arrendatario_informal_rut: (formData.get('rut') as string)?.trim() || null,
+      arrendatario_informal_email: (formData.get('email') as string)?.trim() || null,
+      arrendatario_informal_celular: (formData.get('celular') as string)?.trim() || null,
+      valor_uf: parseFloat(formData.get('valor_uf') as string),
+      moneda: formData.get('moneda') as string,
+      dia_vencimiento: parseInt(formData.get('dia_vencimiento') as string) || 5,
+      multa_monto: multaMonto ? parseFloat(multaMonto) : null,
+      multa_moneda: formData.get('multa_moneda') as string,
     })
     .eq('id', propiedadId)
     .eq('arrendador_id', user.id)
