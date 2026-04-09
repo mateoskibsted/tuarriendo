@@ -159,12 +159,18 @@ export default async function PropiedadPage({ params }: { params: Promise<{ id: 
           contratoId={contrato.id}
           valorUf={contrato.valor_uf}
           pagos={(pagos as Pago[]) ?? []}
+          diaVencimiento={contrato.dia_pago}
+          multaMonto={propiedad.multa_monto}
+          multaMoneda={propiedad.multa_moneda}
         />
       ) : propiedad.arrendatario_informal_nombre ? (
         <PagosSection
           propiedadId={id}
           valorUf={propiedad.valor_uf}
           pagos={(pagos as Pago[]) ?? []}
+          diaVencimiento={propiedad.dia_vencimiento}
+          multaMonto={propiedad.multa_monto}
+          multaMoneda={propiedad.multa_moneda}
         />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">

@@ -20,11 +20,17 @@ export default function PagosSection({
   propiedadId,
   valorUf,
   pagos,
+  diaVencimiento,
+  multaMonto,
+  multaMoneda,
 }: {
   contratoId?: string
   propiedadId?: string
   valorUf: number
   pagos: Pago[]
+  diaVencimiento?: number
+  multaMonto?: number | null
+  multaMoneda?: string | null
 }) {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -33,6 +39,46 @@ export default function PagosSection({
 
   const now = new Date()
   const currentPeriodo = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+
+  // Calcular estado del mes actual
+  const pagoMesActual = pagos.find(p => p.periodo === currentPeriodo)
+
+  // Fecha de vencimiento para el mes actual
+  const fechaVencimiento = diaVencimiento
+    ? new Date(now.getFullYear(), now.getMonth(), diaVencimiento)
+    : null
+  const hoy = new Date(now)
+  hoy.setHours(0, 0, 0, 0)
+
+  // Caso 1: ya hay pago este mes — detectar si fue tarde (por fecha_pago o estado)
+  let pagoFueTarde = false
+  let diasAtrasoRegistrado = 0
+  let multaRegistrada = 0
+  if (pagoMesActual && fechaVencimiento) {
+    const fechaPago = pagoMesActual.fecha_pago ? new Date(pagoMesActual.fecha_pago) : null
+    if (fechaPago) fechaPago.setHours(0, 0, 0, 0)
+    const fueAtrasadoPorFecha = fechaPago && fechaPago > fechaVencimiento
+    const fueAtrasadoPorEstado = pagoMesActual.estado === 'atrasado'
+    if (fueAtrasadoPorFecha || fueAtrasadoPorEstado) {
+      pagoFueTarde = true
+      const referencia = fechaPago ?? hoy
+      diasAtrasoRegistrado = Math.max(
+        0,
+        Math.floor((referencia.getTime() - fechaVencimiento.getTime()) / (24 * 60 * 60 * 1000))
+      )
+      multaRegistrada = multaMonto ? diasAtrasoRegistrado * multaMonto : 0
+    }
+  }
+
+  // Caso 2: sin pago y ya vencido
+  let estaAtrasado = false
+  let diasAtraso = 0
+  let multaAcumulada = 0
+  if (!pagoMesActual && fechaVencimiento && hoy > fechaVencimiento) {
+    estaAtrasado = true
+    diasAtraso = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / (24 * 60 * 60 * 1000))
+    multaAcumulada = multaMonto ? diasAtraso * multaMonto : 0
+  }
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -54,6 +100,63 @@ export default function PagosSection({
   return (
     <Card title="Historial de pagos" subtitle="Últimos 12 meses">
       <div className="space-y-4">
+        {/* Pago recibido pero tarde */}
+        {pagoFueTarde && (
+          <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+            <p className="text-sm font-semibold text-orange-700">
+              Pago de {currentPeriodo} recibido con {diasAtrasoRegistrado} día{diasAtrasoRegistrado !== 1 ? 's' : ''} de atraso
+            </p>
+            {multaRegistrada > 0 && (
+              <p className="text-sm text-orange-600 mt-1">
+                Multa correspondiente:{' '}
+                <span className="font-bold">
+                  {multaMoneda === 'CLP'
+                    ? `$${multaRegistrada.toLocaleString('es-CL')} CLP`
+                    : `${multaRegistrada} ${multaMoneda ?? ''}`}
+                </span>
+                {multaMonto && (
+                  <span className="text-orange-400 font-normal">
+                    {' '}({multaMoneda === 'CLP' ? `$${multaMonto.toLocaleString('es-CL')}` : multaMonto}/día × {diasAtrasoRegistrado} días)
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Sin pago y ya vencido */}
+        {estaAtrasado && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <p className="text-sm font-semibold text-red-700">
+              ⚠ Pago de {currentPeriodo} no recibido — {diasAtraso} día{diasAtraso !== 1 ? 's' : ''} de atraso
+            </p>
+            {multaAcumulada > 0 && (
+              <p className="text-sm text-red-600 mt-1">
+                Multa acumulada:{' '}
+                <span className="font-bold">
+                  {multaMoneda === 'CLP'
+                    ? `$${multaAcumulada.toLocaleString('es-CL')} CLP`
+                    : `${multaAcumulada} ${multaMoneda ?? ''}`}
+                </span>
+                {multaMonto && (
+                  <span className="text-red-400 font-normal">
+                    {' '}({multaMoneda === 'CLP' ? `$${multaMonto.toLocaleString('es-CL')}` : multaMonto}/día × {diasAtraso} días)
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Pendiente antes del vencimiento */}
+        {!pagoMesActual && !estaAtrasado && diaVencimiento && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3">
+            <p className="text-sm text-yellow-700">
+              Pago de {currentPeriodo} pendiente — vence el día {diaVencimiento} de este mes
+            </p>
+          </div>
+        )}
+
         <div className="flex justify-end">
           <Button size="sm" onClick={() => setShowForm(!showForm)}>
             {showForm ? 'Cancelar' : '+ Registrar pago'}

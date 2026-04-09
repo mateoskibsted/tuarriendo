@@ -396,7 +396,7 @@ export async function registrarPagoInformal(propiedadId: string, formData: FormD
 
   const { data: propiedad } = await admin
     .from('propiedades')
-    .select('id')
+    .select('id, dia_vencimiento, multa_monto, multa_moneda')
     .eq('id', propiedadId)
     .eq('arrendador_id', user.id)
     .single()
@@ -406,8 +406,30 @@ export async function registrarPagoInformal(propiedadId: string, formData: FormD
   const periodo = formData.get('periodo') as string
   const valorUf = parseFloat(formData.get('valor_uf') as string)
   const valorClp = formData.get('valor_clp') ? parseInt(formData.get('valor_clp') as string) : null
-  const estado = formData.get('estado') as string
-  const notas = formData.get('notas') as string
+  let estado = formData.get('estado') as string
+  let notas = (formData.get('notas') as string) || ''
+
+  // Auto-detect atraso cuando se registra como pagado
+  if (estado === 'pagado' && propiedad.dia_vencimiento) {
+    const [year, month] = periodo.split('-').map(Number)
+    const fechaVencimiento = new Date(year, month - 1, propiedad.dia_vencimiento)
+    const hoy = new Date()
+    hoy.setHours(0, 0, 0, 0)
+    if (hoy > fechaVencimiento) {
+      const diasAtraso = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / (24 * 60 * 60 * 1000))
+      estado = 'atrasado'
+      if (propiedad.multa_monto && diasAtraso > 0) {
+        const multaTotal = diasAtraso * propiedad.multa_monto
+        const moneda = propiedad.multa_moneda ?? 'CLP'
+        const multaStr = moneda === 'CLP'
+          ? `$${multaTotal.toLocaleString('es-CL')} CLP`
+          : `${multaTotal} ${moneda}`
+        notas = `Pago con ${diasAtraso} día(s) de atraso. Multa: ${multaStr}${notas ? '. ' + notas : ''}`
+      } else {
+        notas = `Pago con ${diasAtraso} día(s) de atraso${notas ? '. ' + notas : ''}`
+      }
+    }
+  }
 
   const { data: existing } = await admin
     .from('pagos')

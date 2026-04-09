@@ -35,19 +35,23 @@ export default async function ArrendadorDashboard() {
 
   const contratoIds = (contratos ?? []).map((c: Contrato) => c.id)
 
-  // Pagos confirmados este mes — formales (por contrato)
+  // Pagos este mes — formales (por contrato)
   const { data: pagosFormalesEsteMes } = contratoIds.length > 0
     ? await admin
         .from('pagos')
-        .select('contrato_id')
+        .select('contrato_id, estado, fecha_pago')
         .in('contrato_id', contratoIds)
         .eq('periodo', mesActual)
-        .eq('estado', 'pagado')
     : { data: [] }
 
-  const pagosEsteMesSet = new Set((pagosFormalesEsteMes ?? []).map((p: { contrato_id: string }) => p.contrato_id))
+  type PagoResumen = { contrato_id?: string | null; propiedad_id?: string | null; estado: string; fecha_pago?: string | null }
+  const pagosFormalMap = new Map<string, PagoResumen>(
+    (pagosFormalesEsteMes ?? [])
+      .filter((p: PagoResumen) => p.contrato_id)
+      .map((p: PagoResumen) => [p.contrato_id!, p])
+  )
 
-  // Pagos confirmados este mes — informales (por propiedad)
+  // Pagos este mes — informales (por propiedad)
   const propiedadesInformalesIds = (propiedades ?? [])
     .filter((p: Propiedad) => !!(p as Propiedad & { arrendatario_informal_nombre?: string }).arrendatario_informal_nombre && !(contratos ?? []).find((c: Contrato) => c.propiedad_id === p.id))
     .map((p: Propiedad) => p.id)
@@ -55,13 +59,39 @@ export default async function ArrendadorDashboard() {
   const { data: pagosInformalesEsteMes } = propiedadesInformalesIds.length > 0
     ? await admin
         .from('pagos')
-        .select('propiedad_id')
+        .select('propiedad_id, estado, fecha_pago')
         .in('propiedad_id', propiedadesInformalesIds)
         .eq('periodo', mesActual)
-        .eq('estado', 'pagado')
     : { data: [] }
 
-  const propiedadesPagadasSet = new Set((pagosInformalesEsteMes ?? []).map((p: { propiedad_id: string }) => p.propiedad_id))
+  const pagosInformalMap = new Map<string, PagoResumen>(
+    (pagosInformalesEsteMes ?? [])
+      .filter((p: PagoResumen) => p.propiedad_id)
+      .map((p: PagoResumen) => [p.propiedad_id!, p])
+  )
+
+  // Helper: ¿está atrasado un pago dado dia de vencimiento y fecha_pago?
+  function esPagoAtrasado(diaPago: number, fechaPagoStr?: string | null, periodo?: string): boolean {
+    const [year, month] = (periodo ?? mesActual).split('-').map(Number)
+    const vencimiento = new Date(year, month - 1, diaPago)
+    if (!fechaPagoStr) return false
+    const fechaPago = new Date(fechaPagoStr)
+    fechaPago.setHours(0, 0, 0, 0)
+    vencimiento.setHours(0, 0, 0, 0)
+    return fechaPago > vencimiento
+  }
+
+  function diasDeAtraso(diaPago: number, periodo?: string): number {
+    const [year, month] = (periodo ?? mesActual).split('-').map(Number)
+    const vencimiento = new Date(year, month - 1, diaPago)
+    vencimiento.setHours(0, 0, 0, 0)
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
+    return Math.max(0, Math.floor((hoy.getTime() - vencimiento.getTime()) / (24 * 60 * 60 * 1000)))
+  }
+
+  // Para stats: contar pagados (incluye atrasados que ya pagaron)
+  const pagadosEsteMesFormal = (pagosFormalesEsteMes ?? []).filter((p: PagoResumen) => p.estado === 'pagado' || p.estado === 'atrasado').length
+  const pagadosEsteMesInformal = (pagosInformalesEsteMes ?? []).filter((p: PagoResumen) => p.estado === 'pagado' || p.estado === 'atrasado').length
 
   // Check if Gmail is connected
   const { data: emailConnection } = await admin
@@ -73,7 +103,7 @@ export default async function ArrendadorDashboard() {
   const totalPropiedades = propiedades?.length ?? 0
   const puedeAgregarMas = totalPropiedades < MAX_PROPIEDADES
   const propiedadesConInquilino = (contratos ?? []).length + propiedadesInformalesIds.length
-  const pagadosEsteMes = (pagosFormalesEsteMes?.length ?? 0) + (pagosInformalesEsteMes?.length ?? 0)
+  const pagadosEsteMes = pagadosEsteMesFormal + pagadosEsteMesInformal
 
   return (
     <div className="space-y-6">
@@ -148,36 +178,66 @@ export default async function ArrendadorDashboard() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {propiedades.map((p: Propiedad) => {
             const contrato = (contratos ?? []).find((c: Contrato) => c.propiedad_id === p.id)
-            const tienePagoFormal = contrato && pagosEsteMesSet.has(contrato.id)
             const pp = p as Propiedad & { arrendatario_informal_nombre?: string; arrendatario_informal_fecha_fin?: string }
             const tieneInformal = !contrato && !!pp.arrendatario_informal_nombre
-            const tienePagoInformal = tieneInformal && propiedadesPagadasSet.has(p.id)
             const contratoVencido = tieneInformal && pp.arrendatario_informal_fecha_fin
               && new Date(pp.arrendatario_informal_fecha_fin) < new Date()
 
+            // Estado del pago del mes
+            const pagoFormal = contrato ? pagosFormalMap.get(contrato.id) : undefined
+            const pagoInformal = tieneInformal ? pagosInformalMap.get(p.id) : undefined
+            const pago = pagoFormal ?? pagoInformal
+
+            const diaPago = contrato
+              ? (contrato as Contrato & { dia_pago: number }).dia_pago
+              : p.dia_vencimiento
+
+            const pagado = pago?.estado === 'pagado' || pago?.estado === 'atrasado'
+            const pagoConAtraso = pagado && (pago?.estado === 'atrasado' || esPagoAtrasado(diaPago ?? 5, pago?.fecha_pago, mesActual))
+            const sinPagoAtrasado = !pagado && !!diaPago && diasDeAtraso(diaPago, mesActual) > 0
+            const dias = sinPagoAtrasado ? diasDeAtraso(diaPago!, mesActual) : 0
+
+            const tieneArrendatario = !!(contrato || tieneInformal)
+
             return (
               <Link key={p.id} href={`/arrendador/propiedades/${p.id}`}>
-                <Card className={`hover:border-blue-300 transition-colors cursor-pointer h-full ${contratoVencido ? 'border-orange-200' : ''}`}>
+                <Card className={`hover:border-blue-300 transition-colors cursor-pointer h-full ${contratoVencido ? 'border-orange-200' : sinPagoAtrasado ? 'border-red-200' : pagoConAtraso ? 'border-orange-200' : ''}`}>
                   <div className="flex justify-between items-start mb-3">
                     <h3 className="font-semibold text-gray-900">{p.nombre}</h3>
                     {contratoVencido ? (
                       <Badge variant="red">Necesita revisión</Badge>
-                    ) : contrato && tienePagoFormal ? (
-                      <Badge variant="green">Pagado</Badge>
-                    ) : contrato ? (
-                      <Badge variant="yellow">Sin pago</Badge>
-                    ) : tienePagoInformal ? (
-                      <Badge variant="green">Pagado</Badge>
-                    ) : tieneInformal ? (
-                      <Badge variant="yellow">Sin pago</Badge>
-                    ) : (
+                    ) : !tieneArrendatario ? (
                       <Badge variant="gray">Disponible</Badge>
+                    ) : pagoConAtraso ? (
+                      <Badge variant="yellow">Pagado con atraso</Badge>
+                    ) : pagado ? (
+                      <Badge variant="green">Pagado</Badge>
+                    ) : sinPagoAtrasado ? (
+                      <Badge variant="red">Atrasado</Badge>
+                    ) : (
+                      <Badge variant="yellow">Sin pago</Badge>
                     )}
                   </div>
                   <p className="text-sm text-gray-500 mb-3">{p.direccion}</p>
                   <p className="text-lg font-bold text-blue-700">
                     {p.moneda === 'CLP' ? formatCLP(p.valor_uf) : `${formatUF(p.valor_uf)} UF`}/mes
                   </p>
+                  {sinPagoAtrasado && (
+                    <p className="text-xs text-red-500 mt-1">{dias} día{dias !== 1 ? 's' : ''} de atraso</p>
+                  )}
+                  {pagoConAtraso && p.multa_monto && (() => {
+                    const fechaPago = pago?.fecha_pago ? new Date(pago.fecha_pago) : new Date()
+                    const [year, month] = mesActual.split('-').map(Number)
+                    const venc = new Date(year, month - 1, diaPago ?? 5)
+                    fechaPago.setHours(0,0,0,0); venc.setHours(0,0,0,0)
+                    const d = Math.max(0, Math.floor((fechaPago.getTime() - venc.getTime()) / 86400000))
+                    const multa = d * p.multa_monto!
+                    return d > 0 ? (
+                      <p className="text-xs text-orange-500 mt-1">
+                        Multa: {p.multa_moneda === 'CLP' ? `$${multa.toLocaleString('es-CL')}` : `${multa} ${p.multa_moneda}`} ({d} día{d !== 1 ? 's' : ''})
+                      </p>
+                    ) : null
+                  })()}
                   <p className="text-xs mt-2 flex items-center gap-1">
                     {contrato
                       ? <><span className="text-gray-400">Arrendatario:</span> <span className="text-gray-700 font-medium">{(contrato as Contrato & { profiles: { nombre: string } }).profiles?.nombre}</span></>

@@ -358,7 +358,7 @@ export async function confirmarPagoEmail(
 
   const { data: contrato } = await admin
     .from('contratos')
-    .select('id, propiedad_id, propiedades(arrendador_id)')
+    .select('id, propiedad_id, dia_pago, propiedades(arrendador_id, multa_monto, multa_moneda)')
     .eq('id', contratoId)
     .single()
 
@@ -366,6 +366,32 @@ export async function confirmarPagoEmail(
     ?.propiedades?.arrendador_id
 
   if (!contrato || arrendadorId !== user.id) return { error: 'No autorizado' }
+
+  // Detect atraso using dia_pago from contrato
+  let estado = 'pagado'
+  let notas = 'Registrado automáticamente desde correo'
+  const diaPago = (contrato as unknown as { dia_pago?: number }).dia_pago
+  const propiedadData = (contrato as unknown as { propiedades?: { multa_monto?: number | null; multa_moneda?: string | null } }).propiedades
+  if (diaPago) {
+    const [year, month] = periodo.split('-').map(Number)
+    const fechaVencimiento = new Date(year, month - 1, diaPago)
+    const hoy = new Date()
+    hoy.setHours(0, 0, 0, 0)
+    if (hoy > fechaVencimiento) {
+      const diasAtraso = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / (24 * 60 * 60 * 1000))
+      estado = 'atrasado'
+      if (propiedadData?.multa_monto && diasAtraso > 0) {
+        const multaTotal = diasAtraso * propiedadData.multa_monto
+        const moneda = propiedadData.multa_moneda ?? 'CLP'
+        const multaStr = moneda === 'CLP'
+          ? `$${multaTotal.toLocaleString('es-CL')} CLP`
+          : `${multaTotal} ${moneda}`
+        notas = `Registrado desde correo. Pago con ${diasAtraso} día(s) de atraso. Multa: ${multaStr}`
+      } else {
+        notas = `Registrado desde correo. Pago con ${diasAtraso} día(s) de atraso`
+      }
+    }
+  }
 
   const { data: existing } = await admin
     .from('pagos')
@@ -379,9 +405,9 @@ export async function confirmarPagoEmail(
     periodo,
     valor_uf: 0,
     valor_clp: montoCLP,
-    estado: 'pagado',
+    estado,
     fecha_pago: new Date().toISOString(),
-    notas: 'Registrado automáticamente desde correo',
+    notas,
     email_origen: emailId ? `https://mail.google.com/mail/u/0/#all/${emailId}` : null,
   }
 
@@ -420,15 +446,39 @@ export async function confirmarPagoEmailInformal(
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }
 
-  // Verify ownership
+  // Verify ownership and fetch fine config
   const { data: propiedad } = await admin
     .from('propiedades')
-    .select('id')
+    .select('id, dia_vencimiento, multa_monto, multa_moneda')
     .eq('id', propiedadId)
     .eq('arrendador_id', user.id)
     .single()
 
   if (!propiedad) return { error: 'No autorizado' }
+
+  // Detect atraso
+  let estado = 'pagado'
+  let notas = 'Registrado automáticamente desde correo'
+  if (propiedad.dia_vencimiento) {
+    const [year, month] = periodo.split('-').map(Number)
+    const fechaVencimiento = new Date(year, month - 1, propiedad.dia_vencimiento)
+    const hoy = new Date()
+    hoy.setHours(0, 0, 0, 0)
+    if (hoy > fechaVencimiento) {
+      const diasAtraso = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / (24 * 60 * 60 * 1000))
+      estado = 'atrasado'
+      if (propiedad.multa_monto && diasAtraso > 0) {
+        const multaTotal = diasAtraso * propiedad.multa_monto
+        const moneda = propiedad.multa_moneda ?? 'CLP'
+        const multaStr = moneda === 'CLP'
+          ? `$${multaTotal.toLocaleString('es-CL')} CLP`
+          : `${multaTotal} ${moneda}`
+        notas = `Registrado desde correo. Pago con ${diasAtraso} día(s) de atraso. Multa: ${multaStr}`
+      } else {
+        notas = `Registrado desde correo. Pago con ${diasAtraso} día(s) de atraso`
+      }
+    }
+  }
 
   const { data: existing } = await admin
     .from('pagos')
@@ -443,9 +493,9 @@ export async function confirmarPagoEmailInformal(
     periodo,
     valor_uf: 0,
     valor_clp: montoCLP,
-    estado: 'pagado',
+    estado,
     fecha_pago: new Date().toISOString(),
-    notas: 'Registrado automáticamente desde correo',
+    notas,
     email_origen: emailId ? `https://mail.google.com/mail/u/0/#all/${emailId}` : null,
   }
 
