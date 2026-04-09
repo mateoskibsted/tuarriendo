@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getUFValue } from '@/lib/utils/uf'
-import { revalidatePath } from 'next/cache'
+
+// GET — simple ping to verify the endpoint is reachable
+export async function GET() {
+  return new NextResponse('WhatsApp webhook OK', { status: 200 })
+}
 
 async function parseTwilioBody(req: NextRequest): Promise<Record<string, string>> {
   const text = await req.text()
@@ -32,11 +36,8 @@ function diasHastaVencimiento(diaVencimiento: number): { dias: number; texto: st
   const hoy = new Date()
   const este = new Date(hoy.getFullYear(), hoy.getMonth(), diaVencimiento)
   const prox = new Date(hoy.getFullYear(), hoy.getMonth() + 1, diaVencimiento)
-
-  // Use current month's date if it hasn't passed yet, else next month
   const fechaRef = este >= hoy ? este : prox
   const dias = Math.ceil((fechaRef.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24))
-
   const mesNombre = fechaRef.toLocaleDateString('es-CL', { month: 'long' })
   if (dias === 0) return { dias: 0, texto: `hoy vence (${diaVencimiento} de ${mesNombre})` }
   if (dias > 0) return { dias, texto: `faltan *${dias} días* — vence el ${diaVencimiento} de ${mesNombre}` }
@@ -57,18 +58,29 @@ export async function POST(req: NextRequest) {
   try {
     const body = await parseTwilioBody(req)
     const fromRaw = body['From'] ?? ''
-    const messageBody = (body['Body'] ?? '').trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    const messageBody = (body['Body'] ?? '')
+      .trim()
+      .toUpperCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
 
     const phone = fromRaw.replace('whatsapp:', '')
-    if (!phone) return new NextResponse('', { status: 400 })
+    if (!phone) {
+      return twiml('Error: número no identificado.')
+    }
 
     const admin = createAdminClient()
 
-    const { data: propiedades } = await admin
+    const { data: propiedades, error: dbError } = await admin
       .from('propiedades')
-      .select('id, nombre, dia_vencimiento, valor_uf, moneda, arrendatario_informal_nombre, arrendatario_informal_celular, arrendatario_informal_cobro_tipo, arrendatario_informal_fecha_inicio, arrendatario_informal_fecha_fin, whatsapp_estado')
+      .select('id, nombre, dia_vencimiento, valor_uf, moneda, arrendatario_informal_nombre, arrendatario_informal_celular, arrendatario_informal_cobro_tipo, arrendatario_informal_fecha_inicio, arrendatario_informal_fecha_fin')
       .eq('activa', true)
       .not('arrendatario_informal_celular', 'is', null)
+
+    if (dbError) {
+      console.error('DB error in webhook:', dbError)
+      return twiml('Error interno. Intenta de nuevo más tarde.')
+    }
 
     const propiedad = (propiedades ?? []).find(p => {
       const stored = (p.arrendatario_informal_celular ?? '').replace(/\D/g, '')
@@ -76,7 +88,13 @@ export async function POST(req: NextRequest) {
       return stored === incoming
     })
 
-    if (!propiedad) return new NextResponse('', { status: 200 })
+    if (!propiedad) {
+      // Unknown sender — silent 200
+      return new NextResponse('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
+        status: 200,
+        headers: { 'Content-Type': 'text/xml' },
+      })
+    }
 
     const nombre = propiedad.arrendatario_informal_nombre ?? 'arrendatario'
     const diaVencimiento = propiedad.dia_vencimiento ?? 5
@@ -86,13 +104,9 @@ export async function POST(req: NextRequest) {
         .from('propiedades')
         .update({ whatsapp_estado: 'confirmado' })
         .eq('id', propiedad.id)
-      revalidatePath(`/arrendador/propiedades/${propiedad.id}`)
-      revalidatePath('/arrendador')
 
-      // Build detailed welcome message
-      const { dias, texto: diasTexto } = diasHastaVencimiento(diaVencimiento)
+      const { texto: diasTexto, dias } = diasHastaVencimiento(diaVencimiento)
 
-      // Format rent amount
       let montoTexto = ''
       if (propiedad.moneda === 'CLP') {
         montoTexto = formatCLPLocal(propiedad.valor_uf)
@@ -116,25 +130,24 @@ export async function POST(req: NextRequest) {
         const hoy = new Date()
         const mesesRestantes = (fin.getFullYear() - hoy.getFullYear()) * 12 + (fin.getMonth() - hoy.getMonth())
         duracionTexto =
-          `\n📅 Contrato: ${formatFecha(propiedad.arrendatario_informal_fecha_inicio)} al ${formatFecha(propiedad.arrendatario_informal_fecha_fin)}` +
-          (mesesRestantes > 0 ? `\n⏱ Duración restante: ${mesesRestantes} meses` : '\n⚠️ Contrato ya venció')
+          `\nContrato: ${formatFecha(propiedad.arrendatario_informal_fecha_inicio)} al ${formatFecha(propiedad.arrendatario_informal_fecha_fin)}` +
+          (mesesRestantes > 0 ? `\nDuración restante: ${mesesRestantes} meses` : '\nAtención: contrato ya venció')
       } else if (propiedad.arrendatario_informal_fecha_inicio) {
-        duracionTexto = `\n📅 Inicio contrato: ${formatFecha(propiedad.arrendatario_informal_fecha_inicio)}`
+        duracionTexto = `\nInicio contrato: ${formatFecha(propiedad.arrendatario_informal_fecha_inicio)}`
       }
 
       const estadoPago = dias < 0
-        ? `\n\n⚠️ *Atención:* ${diasTexto}. Por favor regulariza tu situación.`
-        : `\n\n✅ Próximo pago: ${diasTexto}.`
+        ? `\n\nATENCION: ${diasTexto}. Por favor regulariza tu situación.`
+        : `\n\nProximo pago: ${diasTexto}.`
 
-      const mensaje =
-        `¡Bienvenido, ${nombre}! 🎉 Ya estás conectado a los recordatorios de *${propiedad.nombre}*.\n\n` +
-        `💰 Arriendo mensual: *${montoTexto}*\n` +
-        `📆 Día de vencimiento: *día ${diaVencimiento}* de cada mes\n` +
-        `🔄 Tipo de cobro: ${cobroTipo}` +
+      return twiml(
+        `Bienvenido, ${nombre}! Ya estas conectado a los recordatorios de *${propiedad.nombre}*.\n\n` +
+        `Arriendo mensual: *${montoTexto}*\n` +
+        `Dia de vencimiento: *dia ${diaVencimiento}* de cada mes\n` +
+        `Tipo de cobro: ${cobroTipo}` +
         duracionTexto +
         estadoPago
-
-      return twiml(mensaje)
+      )
     }
 
     if (messageBody === 'NO' || messageBody === 'N') {
@@ -142,21 +155,17 @@ export async function POST(req: NextRequest) {
         .from('propiedades')
         .update({ whatsapp_estado: 'rechazado' })
         .eq('id', propiedad.id)
-      revalidatePath(`/arrendador/propiedades/${propiedad.id}`)
-      revalidatePath('/arrendador')
 
       return twiml(
-        `Entendido, ${nombre}. Tu decisión fue registrada y será comunicada a tu arrendador. Si cambias de opinión, puedes contactarlo directamente.`
+        `Entendido, ${nombre}. Tu decision fue registrada y sera comunicada a tu arrendador. Si cambias de opinion, puedes contactarlo directamente.`
       )
     }
 
-    // Unrecognized — gentle re-prompt
     return twiml(
-      `Hola ${nombre} 👋 Para responder sobre los recordatorios de arriendo de *${propiedad.nombre}*, escribe:\n✅ *SI* para confirmar\n❌ *NO* para rechazar`
+      `Hola ${nombre}! Para confirmar o rechazar los recordatorios de arriendo de *${propiedad.nombre}*, escribe:\n*SI* para confirmar\n*NO* para rechazar`
     )
   } catch (err) {
     console.error('WhatsApp webhook error:', err)
-    // Return empty 200 so Twilio doesn't retry aggressively
     return new NextResponse('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
       status: 200,
       headers: { 'Content-Type': 'text/xml' },
