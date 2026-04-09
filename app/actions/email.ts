@@ -5,7 +5,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { google } from 'googleapis'
 import Anthropic from '@anthropic-ai/sdk'
 import { revalidatePath } from 'next/cache'
-import { parseEmailForPayment, extractTextFromPayload } from '@/lib/utils/email-parser'
+import { extractTextFromPayload, decodeBase64Url } from '@/lib/utils/email-parser'
+import { getUFValue } from '@/lib/utils/uf'
 import type { PagoSugerido } from '@/lib/types'
 
 async function getAuthContext() {
@@ -35,15 +36,13 @@ function buildOAuthClient(connection: {
   return oauth2Client
 }
 
-/** Use Claude to match a batch of parsed emails against known tenants. */
+/** Use Claude to match emails against tenants, requiring name + amount to both match. */
 async function matchEmailsWithAI(
   emails: Array<{
     idx: number
     asunto: string
-    cuerpo: string
+    rawContent: string  // HTML or plain text, truncated
     monto_clp?: number
-    rut_detectado?: string
-    nombre_detectado?: string
   }>,
   tenants: Array<{
     idx: number
@@ -52,50 +51,56 @@ async function matchEmailsWithAI(
     nombre: string
     rut: string
     propiedadNombre: string
-    monto: number
+    monto_clp: number   // always in CLP for comparison
+    monto_original: number
     moneda: string
   }>
-): Promise<Array<{ emailIdx: number; tenantIdx: number; confianza: 'alta' | 'media' }>> {
+): Promise<Array<{ emailIdx: number; tenantIdx: number; confianza: 'alta' | 'media'; monto_clp?: number }>> {
   if (emails.length === 0 || tenants.length === 0) return []
 
   const client = new Anthropic()
 
   const tenantsText = tenants.map(t =>
-    `[${t.idx}] Nombre: ${t.nombre} | RUT: ${t.rut} | Propiedad: ${t.propiedadNombre} | Monto esperado: ${t.monto} ${t.moneda}`
+    `[${t.idx}] Nombre: "${t.nombre}" | Monto mensual: $${t.monto_clp.toLocaleString('es-CL')} CLP (${t.monto_original} ${t.moneda}) | Propiedad: ${t.propiedadNombre}`
   ).join('\n')
 
   const emailsText = emails.map(e =>
-    `[${e.idx}] Asunto: ${e.asunto}\nMonto detectado: ${e.monto_clp ? `$${e.monto_clp}` : 'no detectado'} | RUT detectado: ${e.rut_detectado ?? 'ninguno'} | Nombre detectado: ${e.nombre_detectado ?? 'ninguno'}\nCuerpo (extracto): ${e.cuerpo.slice(0, 400)}`
+    `[${e.idx}] Asunto: ${e.asunto}\nContenido:\n${e.rawContent.slice(0, 600)}`
   ).join('\n\n---\n\n')
 
-  const prompt = `Eres un asistente que analiza correos bancarios chilenos para detectar pagos de arriendo.
+  const prompt = `Eres un asistente que detecta pagos de arriendo en correos bancarios chilenos.
 
-ARRENDATARIOS REGISTRADOS:
+ARRENDATARIOS Y MONTOS ESPERADOS:
 ${tenantsText}
 
-CORREOS A ANALIZAR:
+CORREOS BANCARIOS RECIBIDOS:
 ${emailsText}
 
-TAREA: Determina cuáles correos son pagos de arriendo de algún arrendatario registrado.
-Solo incluye coincidencias donde estés seguro de que el correo corresponde a un pago de arriendo.
-Ignora correos que claramente no son pagos de arriendo (compras, sueldos, otros).
+TAREA: Para cada correo, determina si es un pago de arriendo de algún arrendatario.
 
-Responde ÚNICAMENTE con un JSON válido, sin texto adicional:
+REGLAS ESTRICTAS — un correo es un pago solo si cumple AMBAS condiciones:
+1. El nombre del remitente en el correo coincide (exacto o muy similar) con el nombre del arrendatario
+2. El monto transferido en el correo es similar al monto mensual esperado (±10%)
+
+Si solo coincide el nombre pero no el monto, o solo el monto pero no el nombre: NO incluir.
+Si el correo es de pagos propios (compras, servicios, sueldos salientes): NO incluir.
+
+Responde ÚNICAMENTE con JSON válido:
 [
-  {"email": <número del correo>, "arrendatario": <número del arrendatario>, "confianza": "alta" o "media"},
-  ...
+  {
+    "email": <número>,
+    "arrendatario": <número>,
+    "monto_detectado": <monto en CLP extraído del correo, o null>,
+    "confianza": "alta" (nombre exacto + monto exacto) o "media" (nombre similar + monto aproximado)
+  }
 ]
 
-Reglas:
-- "alta": RUT coincide exactamente, o nombre exacto + monto muy similar al esperado
-- "media": nombre parcial o monto similar al esperado, pero sin certeza total
-- Si un correo no corresponde a ningún arrendatario, NO lo incluyas en la respuesta
-- Si no hay coincidencias, responde con []`
+Si no hay coincidencias válidas, responde con: []`
 
   try {
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 500,
+      max_tokens: 600,
       messages: [{ role: 'user', content: prompt }],
     })
 
@@ -106,6 +111,7 @@ Reglas:
     const parsed = JSON.parse(jsonMatch[0]) as Array<{
       email: number
       arrendatario: number
+      monto_detectado?: number | null
       confianza: string
     }>
 
@@ -115,10 +121,28 @@ Reglas:
         emailIdx: r.email,
         tenantIdx: r.arrendatario,
         confianza: r.confianza as 'alta' | 'media',
+        monto_clp: r.monto_detectado ?? undefined,
       }))
   } catch {
     return []
   }
+}
+
+/** Recursively find the first text/html part in a Gmail payload */
+function findHtmlPart(payload: {
+  mimeType?: string | null
+  body?: { data?: string | null } | null
+  parts?: unknown[]
+} | null | undefined): string | null {
+  if (!payload) return null
+  if (payload.mimeType === 'text/html' && payload.body?.data) return payload.body.data
+  if (payload.parts) {
+    for (const part of payload.parts) {
+      const found = findHtmlPart(part as Parameters<typeof findHtmlPart>[0])
+      if (found) return found
+    }
+  }
+  return null
 }
 
 export async function desconectarEmail() {
@@ -215,6 +239,16 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
 
   if (tenants.length === 0) return { sugerencias: [] }
 
+  // Get current UF value for CLP conversion
+  const ufValue = await getUFValue()
+
+  // Convert all tenant amounts to CLP
+  const tenantsConCLP = tenants.map(t => ({
+    ...t,
+    monto_clp: t.moneda === 'UF' ? Math.round(t.monto * ufValue) : t.monto,
+    monto_original: t.monto,
+  }))
+
   // Connect to Gmail
   const oauth2Client = buildOAuthClient(connection)
   oauth2Client.on('tokens', async (newTokens) => {
@@ -249,11 +283,7 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
     emailId: string
     asunto: string
     fecha: string
-    cuerpo: string
-    monto_clp?: number
-    rut_detectado?: string
-    nombre_detectado?: string
-    banco?: string
+    rawContent: string
   }> = []
 
   for (const msg of messageList) {
@@ -264,42 +294,51 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
       const headers = msgData.payload?.headers ?? []
       const subject = headers.find(h => h.name === 'Subject')?.value ?? ''
       const dateHeader = headers.find(h => h.name === 'Date')?.value ?? ''
-      const body = extractTextFromPayload(msgData.payload ?? {})
-      const parsed = parseEmailForPayment(subject, body)
+
+      // Try plain text first, fall back to stripped HTML
+      const plainText = extractTextFromPayload(msgData.payload ?? {})
+
+      // Also get raw HTML for fallback (BICE and others send HTML-only)
+      let rawContent = plainText
+      if (!plainText || plainText.length < 50) {
+        const htmlPart = findHtmlPart(msgData.payload)
+        if (htmlPart) {
+          rawContent = decodeBase64Url(htmlPart)
+            .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+            .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+            .replace(/<!--[\s\S]*?-->/g, ' ')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s{2,}/g, ' ')
+            .trim()
+        }
+      }
 
       parsedEmails.push({
         idx: parsedEmails.length + 1,
         emailId: msg.id,
         asunto: subject,
         fecha: dateHeader,
-        cuerpo: body,
-        monto_clp: parsed.monto_clp,
-        rut_detectado: parsed.rut,
-        nombre_detectado: parsed.nombre,
-        banco: parsed.banco,
+        rawContent,
       })
     } catch {
       continue
     }
   }
 
-  // Use Claude AI to match emails with tenants
-  const matches = await matchEmailsWithAI(parsedEmails, tenants)
+  // Use Claude AI to match emails with tenants (name + amount required)
+  const matches = await matchEmailsWithAI(parsedEmails, tenantsConCLP)
 
   // Build final suggestions from AI matches only
   const sugerencias: PagoSugerido[] = matches.map(match => {
     const email = parsedEmails.find(e => e.idx === match.emailIdx)
-    const tenant = tenants.find(t => t.idx === match.tenantIdx)
+    const tenant = tenantsConCLP.find(t => t.idx === match.tenantIdx)
     if (!email || !tenant) return null
 
     return {
       emailId: email.emailId,
       fecha: email.fecha,
       asunto: email.asunto,
-      monto_clp: email.monto_clp,
-      rut_detectado: email.rut_detectado,
-      nombre_detectado: email.nombre_detectado,
-      banco: email.banco,
+      monto_clp: match.monto_clp ?? tenant.monto_clp,
       contrato_id: tenant.contratoId,
       propiedad_id: tenant.propiedadId,
       arrendatario_nombre: tenant.nombre,
