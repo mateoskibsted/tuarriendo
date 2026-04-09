@@ -57,42 +57,6 @@ export default function PagosSection({
   const now = new Date()
   const currentPeriodo = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 
-  const pagoMesActual = pagos.find(p => p.periodo === currentPeriodo)
-
-  const fechaVencimiento = diaVencimiento
-    ? new Date(now.getFullYear(), now.getMonth(), diaVencimiento)
-    : null
-  const hoy = new Date(now)
-  hoy.setHours(0, 0, 0, 0)
-
-  let pagoFueTarde = false
-  let diasAtrasoRegistrado = 0
-  let multaRegistrada = 0
-  if (pagoMesActual && fechaVencimiento) {
-    const fechaPago = pagoMesActual.fecha_pago ? new Date(pagoMesActual.fecha_pago) : null
-    if (fechaPago) fechaPago.setHours(0, 0, 0, 0)
-    const fueAtrasadoPorFecha = fechaPago && fechaPago > fechaVencimiento
-    const fueAtrasadoPorEstado = pagoMesActual.estado === 'atrasado'
-    if (fueAtrasadoPorFecha || fueAtrasadoPorEstado) {
-      pagoFueTarde = true
-      const referencia = fechaPago ?? hoy
-      diasAtrasoRegistrado = Math.max(
-        0,
-        Math.floor((referencia.getTime() - fechaVencimiento.getTime()) / (24 * 60 * 60 * 1000))
-      )
-      multaRegistrada = multaMonto ? diasAtrasoRegistrado * multaMonto : 0
-    }
-  }
-
-  let estaAtrasado = false
-  let diasAtraso = 0
-  let multaAcumulada = 0
-  if (!pagoMesActual && fechaVencimiento && hoy > fechaVencimiento) {
-    estaAtrasado = true
-    diasAtraso = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / (24 * 60 * 60 * 1000))
-    multaAcumulada = multaMonto ? diasAtraso * multaMonto : 0
-  }
-
   const periodosRegistrados = new Set(pagos.map(p => p.periodo))
   const periodosVirtuales: string[] = []
   if (fechaInicio) {
@@ -100,15 +64,11 @@ export default function PagosSection({
     const fin = fechaFin
       ? (() => { const [fy, fm] = fechaFin.split('-').map(Number); return new Date(fy, fm - 1, 1) })()
       : new Date(now.getFullYear(), now.getMonth() + 12, 1)
-
     const cur = new Date(iy, im - 1, 1)
     const limFin = new Date(fin.getFullYear(), fin.getMonth(), 1)
-
     while (cur <= limFin) {
       const periodo = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`
-      if (!periodosRegistrados.has(periodo)) {
-        periodosVirtuales.push(periodo)
-      }
+      if (!periodosRegistrados.has(periodo)) periodosVirtuales.push(periodo)
       cur.setMonth(cur.getMonth() + 1)
     }
   }
@@ -127,25 +87,52 @@ export default function PagosSection({
     e.preventDefault()
     setError('')
     const formData = new FormData(e.currentTarget)
-
     startTransition(async () => {
       const result = contratoId
         ? await registrarPago(contratoId, formData)
         : await registrarPagoInformal(propiedadId!, formData)
-      if (result?.error) {
-        setError(result.error)
-      } else {
-        setShowForm(false)
-      }
+      if (result?.error) setError(result.error)
+      else setShowForm(false)
     })
   }
 
-  // Supress unused variable warnings
-  void pagoFueTarde; void diasAtrasoRegistrado; void multaRegistrada
-  void estaAtrasado; void diasAtraso; void multaAcumulada
+  function calcularAtraso(pago: Pago): { dias: number; multa: number } {
+    const hoyLocal = new Date(); hoyLocal.setHours(0, 0, 0, 0)
+
+    if (diaVencimiento) {
+      const [py, pm] = pago.periodo.split('-').map(Number)
+      const venc = new Date(py, pm - 1, diaVencimiento)
+      venc.setHours(0, 0, 0, 0)
+
+      const ref = pago.fecha_pago
+        ? (() => { const d = new Date(pago.fecha_pago!); d.setHours(0, 0, 0, 0); return d })()
+        : hoyLocal
+
+      if (ref > venc) {
+        const dias = Math.floor((ref.getTime() - venc.getTime()) / 86400000)
+        const multa = multaMonto ? dias * multaMonto : 0
+        return { dias, multa }
+      }
+    }
+    return { dias: 0, multa: 0 }
+  }
+
+  function montoBase(pago: Pago): string {
+    if (esCLP) return formatCLP(pago.valor_clp ?? valorUf)
+    return formatUF(pago.valor_uf)
+  }
+
+  function montoBaseVirtual(): string {
+    return esCLP ? formatCLP(valorUf) : formatUF(valorUf)
+  }
 
   return (
-    <Card title="Historial de pagos" subtitle={fechaFin ? `Contrato hasta ${new Date(fechaFin).toLocaleDateString('es-CL', { year: 'numeric', month: 'long' })}` : 'Registro completo del contrato'}>
+    <Card
+      title="Historial de pagos"
+      subtitle={fechaFin
+        ? `Contrato hasta ${new Date(fechaFin).toLocaleDateString('es-CL', { year: 'numeric', month: 'long' })}`
+        : 'Registro completo del contrato'}
+    >
       <div className="space-y-4">
         <div className="flex justify-end">
           <Button size="sm" onClick={() => setShowForm(!showForm)}>
@@ -156,52 +143,23 @@ export default function PagosSection({
         {showForm && (
           <form onSubmit={handleSubmit} className="bg-gray-50 rounded-lg p-4 space-y-3 border">
             <div className="grid grid-cols-2 gap-3">
-              <Input
-                label="Período (YYYY-MM)"
-                name="periodo"
-                defaultValue={currentPeriodo}
-                placeholder="2024-01"
-                required
-              />
-              <Input
-                label="Valor UF"
-                name="valor_uf"
-                type="number"
-                step="0.01"
-                defaultValue={valorUf}
-                required
-              />
+              <Input label="Período (YYYY-MM)" name="periodo" defaultValue={currentPeriodo} placeholder="2024-01" required />
+              <Input label="Valor UF" name="valor_uf" type="number" step="0.01" defaultValue={valorUf} required />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <Input
-                label="Valor CLP (opcional)"
-                name="valor_clp"
-                type="number"
-                placeholder="37000000"
-              />
+              <Input label="Valor CLP (opcional)" name="valor_clp" type="number" placeholder="37000000" />
               <div className="space-y-1">
                 <label className="block text-sm font-medium text-gray-700">Estado</label>
-                <select
-                  name="estado"
-                  className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
+                <select name="estado" className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                   <option value="pagado">Pagado</option>
                   <option value="pendiente">Pendiente</option>
                   <option value="atrasado">Atrasado</option>
                 </select>
               </div>
             </div>
-            <Input
-              label="Notas (opcional)"
-              name="notas"
-              placeholder="Pago realizado por transferencia..."
-            />
-
+            <Input label="Notas (opcional)" name="notas" placeholder="Pago realizado por transferencia..." />
             {error && <p className="text-sm text-red-600">{error}</p>}
-
-            <Button type="submit" size="sm" loading={isPending}>
-              Guardar pago
-            </Button>
+            <Button type="submit" size="sm" loading={isPending}>Guardar pago</Button>
           </form>
         )}
 
@@ -209,169 +167,144 @@ export default function PagosSection({
           <p className="text-sm text-gray-500 text-center py-4">Sin pagos registrados</p>
         ) : (
           <div className="overflow-x-auto">
-            {/* Encabezado */}
-            <div className="min-w-[600px]">
-              <div className="grid grid-cols-[80px_1fr_1fr_1fr_160px_80px] gap-2 px-1 pb-2 border-b border-gray-200 mb-1">
-                <span className="text-xs font-semibold text-gray-400 uppercase">Período</span>
-                <span className="text-xs font-semibold text-gray-400 uppercase text-right">{montoHeader}</span>
-                <span className="text-xs font-semibold text-gray-400 uppercase text-right">Deuda período</span>
-                <span className="text-xs font-semibold text-gray-400 uppercase">Estado</span>
-                <span className="text-xs font-semibold text-gray-400 uppercase">Fecha pago</span>
-                <span className="text-xs font-semibold text-gray-400 uppercase text-right">Acciones</span>
-              </div>
-
-              <div className="space-y-0">
-              {todasLasFilas.map((fila) => {
-                if (fila.tipo === 'virtual') {
-                  const esPasado = fila.periodo < currentPeriodo
-                  const montoDisplay = esCLP ? formatCLP(valorUf) : formatUF(valorUf)
-                  return (
-                    <div key={`virtual-${fila.periodo}`} className="min-w-[600px]">
-                      <div className="grid grid-cols-[80px_1fr_1fr_1fr_160px_80px] gap-2 py-2 border-b border-gray-50 px-1 opacity-50">
-                        <span className="font-mono text-sm text-gray-500">{fila.periodo}</span>
-                        <span className="text-sm text-gray-400 text-right">{montoDisplay}</span>
-                        <span className="text-sm text-gray-300 text-right">—</span>
-                        <span>
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-gray-200">
+                  <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Período</th>
+                  <th className="text-right py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">{montoHeader}</th>
+                  <th className="text-right py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Deuda período</th>
+                  <th className="text-center py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Estado</th>
+                  <th className="text-center py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Fecha pago</th>
+                  <th className="text-right py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {todasLasFilas.map((fila) => {
+                  if (fila.tipo === 'virtual') {
+                    const esPasado = fila.periodo < currentPeriodo
+                    return (
+                      <tr key={`virtual-${fila.periodo}`} className="border-b border-gray-50 opacity-50">
+                        <td className="py-2 px-2 font-mono text-gray-500">{fila.periodo}</td>
+                        <td className="py-2 px-2 text-right text-gray-400">{montoBaseVirtual()}</td>
+                        <td className="py-2 px-2 text-right text-gray-300">—</td>
+                        <td className="py-2 px-2 text-center">
                           <Badge variant={esPasado ? 'red' : 'yellow'}>{esPasado ? 'Sin registrar' : 'Pendiente'}</Badge>
-                        </span>
-                        <span className="text-sm text-gray-300">—</span>
-                        <span />
-                      </div>
-                    </div>
-                  )
-                }
-
-                const pago = fila.pago
-                const badge = estadoBadge[pago.estado]
-                const isEditing = editingId === pago.id
-
-                // Calcular atraso para esta fila
-                let filaDiasAtraso = 0
-                let filaMulta = 0
-                if (diaVencimiento && pago.fecha_pago) {
-                  const [py, pm] = pago.periodo.split('-').map(Number)
-                  const venc = new Date(py, pm - 1, diaVencimiento)
-                  venc.setHours(0, 0, 0, 0)
-                  const fp = new Date(pago.fecha_pago)
-                  fp.setHours(0, 0, 0, 0)
-                  if (fp > venc) {
-                    filaDiasAtraso = Math.floor((fp.getTime() - venc.getTime()) / 86400000)
-                    filaMulta = multaMonto ? filaDiasAtraso * multaMonto : 0
+                        </td>
+                        <td className="py-2 px-2 text-center text-gray-300">—</td>
+                        <td className="py-2 px-2" />
+                      </tr>
+                    )
                   }
-                }
-                const esFilaAtrasadaSinPago = !pago.fecha_pago && pago.estado === 'atrasado' && diaVencimiento && (() => {
-                  const [py, pm] = pago.periodo.split('-').map(Number)
-                  const venc = new Date(py, pm - 1, diaVencimiento)
-                  venc.setHours(0, 0, 0, 0)
-                  const hoyLocal = new Date(); hoyLocal.setHours(0, 0, 0, 0)
-                  if (hoyLocal > venc) {
-                    filaDiasAtraso = Math.floor((hoyLocal.getTime() - venc.getTime()) / 86400000)
-                    filaMulta = multaMonto ? filaDiasAtraso * multaMonto : 0
-                    return true
+
+                  const pago = fila.pago
+                  const badge = estadoBadge[pago.estado]
+                  const isEditing = editingId === pago.id
+                  const { dias: filaDiasAtraso, multa: filaMulta } = calcularAtraso(pago)
+                  const tieneAtraso = filaDiasAtraso > 0 || pago.estado === 'atrasado'
+
+                  // Deuda total: base + multa (solo si hay atraso real con multa configurada)
+                  let deudaTotal = '—'
+                  if (tieneAtraso && filaMulta > 0) {
+                    const baseClp = pago.valor_clp ?? (esCLP ? valorUf : null)
+                    if (baseClp !== null) deudaTotal = formatCLP(baseClp + filaMulta)
                   }
-                  return false
-                })()
 
-                const tieneAtraso = filaDiasAtraso > 0 || esFilaAtrasadaSinPago
-
-                // Monto base del período
-                const montoBase = esCLP
-                  ? formatCLP(pago.valor_clp ?? valorUf)
-                  : formatUF(pago.valor_uf)
-
-                // Deuda total = arriendo + multa (en CLP siempre)
-                let deudaTotal: string = '—'
-                if (tieneAtraso && filaMulta > 0) {
-                  const baseClp = pago.valor_clp ?? (esCLP ? valorUf : null)
-                  if (baseClp !== null) {
-                    deudaTotal = formatCLP(baseClp + filaMulta)
+                  if (isEditing) {
+                    return (
+                      <tr key={pago.id}>
+                        <td colSpan={6} className="py-2 px-2">
+                          <form
+                            onSubmit={(e) => {
+                              e.preventDefault()
+                              const fd = new FormData(e.currentTarget)
+                              startTransition(async () => {
+                                const result = contratoId
+                                  ? await registrarPago(contratoId, fd)
+                                  : await registrarPagoInformal(propiedadId!, fd)
+                                if (result?.error) setError(result.error)
+                                else setEditingId(null)
+                              })
+                            }}
+                            className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2"
+                          >
+                            <input type="hidden" name="periodo" value={pago.periodo} />
+                            <div className="grid grid-cols-2 gap-2">
+                              <Input label="UF" name="valor_uf" type="number" step="0.01" defaultValue={pago.valor_uf} required />
+                              <Input label="CLP" name="valor_clp" type="number" defaultValue={pago.valor_clp ?? ''} />
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Estado</label>
+                                <select name="estado" defaultValue={pago.estado} className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm">
+                                  <option value="pagado">Pagado</option>
+                                  <option value="pendiente">Pendiente</option>
+                                  <option value="atrasado">Atrasado</option>
+                                </select>
+                              </div>
+                              <Input label="Notas" name="notas" defaultValue={pago.notas ?? ''} />
+                            </div>
+                            <div className="flex gap-2">
+                              <Button type="submit" size="sm" loading={isPending}>Guardar</Button>
+                              <button type="button" onClick={() => setEditingId(null)} className="text-sm text-gray-500 hover:text-gray-700 px-2">Cancelar</button>
+                            </div>
+                          </form>
+                        </td>
+                      </tr>
+                    )
                   }
-                }
 
-                if (isEditing) {
                   return (
-                    <form
-                      key={pago.id}
-                      onSubmit={(e) => {
-                        e.preventDefault()
-                        const fd = new FormData(e.currentTarget)
-                        startTransition(async () => {
-                          const result = contratoId
-                            ? await registrarPago(contratoId, fd)
-                            : await registrarPagoInformal(propiedadId!, fd)
-                          if (result?.error) setError(result.error)
-                          else setEditingId(null)
-                        })
-                      }}
-                      className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2 my-1"
-                    >
-                      <input type="hidden" name="periodo" value={pago.periodo} />
-                      <div className="grid grid-cols-2 gap-2">
-                        <Input label="UF" name="valor_uf" type="number" step="0.01" defaultValue={pago.valor_uf} required />
-                        <Input label="CLP" name="valor_clp" type="number" defaultValue={pago.valor_clp ?? ''} />
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">Estado</label>
-                          <select name="estado" defaultValue={pago.estado} className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm">
-                            <option value="pagado">Pagado</option>
-                            <option value="pendiente">Pendiente</option>
-                            <option value="atrasado">Atrasado</option>
-                          </select>
-                        </div>
-                        <Input label="Notas" name="notas" defaultValue={pago.notas ?? ''} />
-                      </div>
-                      <div className="flex gap-2">
-                        <Button type="submit" size="sm" loading={isPending}>Guardar</Button>
-                        <button type="button" onClick={() => setEditingId(null)} className="text-sm text-gray-500 hover:text-gray-700 px-2">Cancelar</button>
-                      </div>
-                    </form>
+                    <>
+                      <tr
+                        key={pago.id}
+                        className={`border-b border-gray-50 group ${tieneAtraso ? 'bg-orange-50' : 'hover:bg-gray-50'}`}
+                      >
+                        <td className="py-2 px-2 font-mono text-gray-700">{pago.periodo}</td>
+                        <td className="py-2 px-2 text-right font-medium text-gray-800">{montoBase(pago)}</td>
+                        <td className={`py-2 px-2 text-right font-medium ${tieneAtraso && filaMulta > 0 ? 'text-orange-600' : 'text-gray-300'}`}>
+                          {deudaTotal}
+                        </td>
+                        <td className="py-2 px-2 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <Badge variant={badge.variant}>{badge.label}</Badge>
+                            {pago.email_origen && (
+                              <a href={pago.email_origen} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline whitespace-nowrap">
+                                Ver correo →
+                              </a>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2 px-2 text-center text-xs text-gray-400 whitespace-nowrap">
+                          {formatFechaPago(pago.fecha_pago)}
+                        </td>
+                        <td className="py-2 px-2">
+                          <div className="flex gap-3 justify-end">
+                            <button onClick={() => setEditingId(pago.id)} className="text-xs text-blue-500 hover:underline">Editar</button>
+                            <button
+                              onClick={() => {
+                                if (!confirm('¿Eliminar este pago?')) return
+                                startTransition(async () => { await eliminarPago(pago.id) })
+                              }}
+                              className="text-xs text-red-400 hover:underline"
+                            >
+                              Eliminar
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {tieneAtraso && (
+                        <tr className={tieneAtraso ? 'bg-orange-50' : ''}>
+                          <td colSpan={6} className="px-2 pb-1.5 text-xs text-orange-600">
+                            {filaDiasAtraso} día{filaDiasAtraso !== 1 ? 's' : ''} de atraso
+                            {filaMulta > 0 && ` — multa: ${multaMoneda === 'CLP' ? `$${filaMulta.toLocaleString('es-CL')} CLP` : `${filaMulta} ${multaMoneda ?? ''}`}`}
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   )
-                }
-
-                return (
-                  <div key={pago.id} className={`border-b border-gray-50 px-1 ${tieneAtraso ? 'bg-orange-50' : ''}`}>
-                    <div className="grid grid-cols-[80px_1fr_1fr_1fr_160px_80px] gap-2 py-2 items-center">
-                      <span className="font-mono text-sm text-gray-700">{pago.periodo}</span>
-                      <span className="text-sm font-medium text-right">{montoBase}</span>
-                      <span className={`text-sm text-right font-medium ${tieneAtraso && filaMulta > 0 ? 'text-orange-600' : 'text-gray-300'}`}>
-                        {deudaTotal}
-                      </span>
-                      <span className="flex items-center gap-2 min-w-0">
-                        <Badge variant={badge.variant}>{badge.label}</Badge>
-                        {pago.email_origen && (
-                          <a href={pago.email_origen} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline whitespace-nowrap">
-                            Ver correo →
-                          </a>
-                        )}
-                      </span>
-                      <span className="text-xs text-gray-400 leading-tight">
-                        {formatFechaPago(pago.fecha_pago)}
-                      </span>
-                      <div className="flex gap-2 justify-end">
-                        <button onClick={() => setEditingId(pago.id)} className="text-xs text-blue-500 hover:underline whitespace-nowrap">Editar</button>
-                        <button
-                          onClick={() => {
-                            if (!confirm('¿Eliminar este pago?')) return
-                            startTransition(async () => { await eliminarPago(pago.id) })
-                          }}
-                          className="text-xs text-red-400 hover:underline whitespace-nowrap"
-                        >
-                          Eliminar
-                        </button>
-                      </div>
-                    </div>
-                    {tieneAtraso && (
-                      <p className="text-xs text-orange-600 pb-1.5 pl-1">
-                        {filaDiasAtraso} día{filaDiasAtraso !== 1 ? 's' : ''} de atraso
-                        {filaMulta > 0 && ` — multa: ${multaMoneda === 'CLP' ? `$${filaMulta.toLocaleString('es-CL')} CLP` : `${filaMulta} ${multaMoneda ?? ''}`}`}
-                      </p>
-                    )}
-                  </div>
-                )
-              })}
-              </div>
-            </div>
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
