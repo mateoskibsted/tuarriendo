@@ -7,7 +7,14 @@ export async function GET() {
 }
 
 function twiml(message: string): NextResponse {
-  const xml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message><![CDATA[${message}]]></Message></Response>`
+  // Escape XML special chars manually instead of CDATA (more compatible)
+  const safe = message
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+  const xml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${safe}</Message></Response>`
   return new NextResponse(xml, {
     status: 200,
     headers: { 'Content-Type': 'text/xml; charset=utf-8' },
@@ -21,6 +28,14 @@ function emptyTwiml(): NextResponse {
   })
 }
 
+function phoneMatch(stored: string, incoming: string): boolean {
+  const s = stored.replace(/\D/g, '')
+  const i = incoming.replace(/\D/g, '')
+  if (!s || !i) return false
+  // Match exact, or one is a suffix of the other (handles country code difference)
+  return s === i || i.endsWith(s) || s.endsWith(i)
+}
+
 export async function POST(req: NextRequest) {
   let fromRaw = ''
   let msgRaw = ''
@@ -30,7 +45,6 @@ export async function POST(req: NextRequest) {
     fromRaw = (formData.get('From') as string ?? '').replace('whatsapp:', '').replace(/\s/g, '')
     msgRaw = (formData.get('Body') as string ?? '').trim()
   } catch {
-    // formData parse failed — try text parsing
     try {
       const text = await req.text()
       for (const pair of text.split('&')) {
@@ -49,7 +63,6 @@ export async function POST(req: NextRequest) {
   if (!fromRaw) return emptyTwiml()
 
   const msgUp = msgRaw.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  const phoneDigits = fromRaw.replace(/\D/g, '')
 
   try {
     const admin = createAdminClient()
@@ -60,10 +73,9 @@ export async function POST(req: NextRequest) {
       .eq('activa', true)
       .not('arrendatario_informal_celular', 'is', null)
 
-    const propiedad = (propiedades ?? []).find(p => {
-      const stored = (p.arrendatario_informal_celular as string ?? '').replace(/\D/g, '')
-      return stored === phoneDigits
-    })
+    const propiedad = (propiedades ?? []).find(p =>
+      phoneMatch(p.arrendatario_informal_celular as string ?? '', fromRaw)
+    )
 
     if (!propiedad) return emptyTwiml()
 
@@ -74,7 +86,6 @@ export async function POST(req: NextRequest) {
     if (msgUp === 'SI' || msgUp === 'S') {
       await admin.from('propiedades').update({ whatsapp_estado: 'confirmado' }).eq('id', propiedad.id)
 
-      // Days until next payment
       const hoy = new Date()
       const este = new Date(hoy.getFullYear(), hoy.getMonth(), dia)
       const prox = new Date(hoy.getFullYear(), hoy.getMonth() + 1, dia)
@@ -82,7 +93,6 @@ export async function POST(req: NextRequest) {
       const dias = Math.ceil((fechaRef.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24))
       const mesNombre = fechaRef.toLocaleDateString('es-CL', { month: 'long' })
 
-      // Rent amount
       const valorUf = propiedad.valor_uf as number
       const moneda = propiedad.moneda as string
       let montoTexto = `${valorUf} ${moneda}`
@@ -96,7 +106,6 @@ export async function POST(req: NextRequest) {
         montoTexto = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(valorUf)
       }
 
-      // Contract duration
       const fechaInicio = propiedad.arrendatario_informal_fecha_inicio as string | null
       const fechaFin = propiedad.arrendatario_informal_fecha_fin as string | null
       let duracion = ''
@@ -127,7 +136,7 @@ export async function POST(req: NextRequest) {
       return twiml(`Entendido, ${nombre}. Tu decision fue registrada y sera comunicada a tu arrendador.`)
     }
 
-    return twiml(`Hola ${nombre}! Responde SI para confirmar o NO para rechazar los recordatorios de ${propNombre}.`)
+    return twiml(`Hola ${nombre}! Responde Si para confirmar o No para rechazar los recordatorios de ${propNombre}.`)
   } catch (err) {
     console.error('Webhook error:', err)
     return twiml('Error interno. Intenta de nuevo.')
