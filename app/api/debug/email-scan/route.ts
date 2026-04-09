@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { google } from 'googleapis'
-import { parseEmailForPayment, extractTextFromPayload } from '@/lib/utils/email-parser'
+import { extractTextFromPayload, decodeBase64Url } from '@/lib/utils/email-parser'
 
 function buildOAuthClient(connection: {
   access_token: string
@@ -20,6 +20,22 @@ function buildOAuthClient(connection: {
     expiry_date: connection.expires_at ? new Date(connection.expires_at).getTime() : undefined,
   })
   return oauth2Client
+}
+
+function findHtmlPart(payload: {
+  mimeType?: string | null
+  body?: { data?: string | null } | null
+  parts?: unknown[]
+} | null | undefined): string | null {
+  if (!payload) return null
+  if (payload.mimeType === 'text/html' && payload.body?.data) return payload.body.data
+  if (payload.parts) {
+    for (const part of payload.parts) {
+      const found = findHtmlPart(part as Parameters<typeof findHtmlPart>[0])
+      if (found) return found
+    }
+  }
+  return null
 }
 
 export async function GET(request: NextRequest) {
@@ -70,15 +86,30 @@ export async function GET(request: NextRequest) {
       const subject = headers.find(h => h.name === 'Subject')?.value ?? ''
       const from = headers.find(h => h.name === 'From')?.value ?? ''
       const date = headers.find(h => h.name === 'Date')?.value ?? ''
-      const body = extractTextFromPayload(res.data.payload ?? {})
-      const parsed = parseEmailForPayment(subject, body)
+
+      const plainText = extractTextFromPayload(res.data.payload ?? {})
+
+      // Same logic as escanearEmails
+      let rawContent = plainText
+      if (!plainText || plainText.length < 50) {
+        const htmlPart = findHtmlPart(res.data.payload)
+        if (htmlPart) {
+          rawContent = decodeBase64Url(htmlPart)
+            .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+            .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+            .replace(/<!--[\s\S]*?-->/g, ' ')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s{2,}/g, ' ')
+            .trim()
+        }
+      }
 
       emails.push({
         subject,
         from,
         date,
-        parsed,
-        bodyPreview: body.slice(0, 300),
+        plainTextLength: plainText.length,
+        rawContentPreview: rawContent.slice(0, 500),
       })
     } catch {
       continue
