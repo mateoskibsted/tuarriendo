@@ -2,22 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getUFValue } from '@/lib/utils/uf'
 
-// GET — simple ping to verify the endpoint is reachable
 export async function GET() {
   return new NextResponse('WhatsApp webhook OK', { status: 200 })
-}
-
-async function parseTwilioBody(req: NextRequest): Promise<Record<string, string>> {
-  const text = await req.text()
-  const params: Record<string, string> = {}
-  for (const pair of text.split('&')) {
-    const idx = pair.indexOf('=')
-    if (idx === -1) continue
-    const key = decodeURIComponent(pair.slice(0, idx))
-    const val = decodeURIComponent(pair.slice(idx + 1)).replace(/\+/g, ' ')
-    params[key] = val
-  }
-  return params
 }
 
 function twiml(message: string): NextResponse {
@@ -39,9 +25,9 @@ function diasHastaVencimiento(diaVencimiento: number): { dias: number; texto: st
   const fechaRef = este >= hoy ? este : prox
   const dias = Math.ceil((fechaRef.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24))
   const mesNombre = fechaRef.toLocaleDateString('es-CL', { month: 'long' })
-  if (dias === 0) return { dias: 0, texto: `hoy vence (${diaVencimiento} de ${mesNombre})` }
-  if (dias > 0) return { dias, texto: `faltan *${dias} días* — vence el ${diaVencimiento} de ${mesNombre}` }
-  return { dias, texto: `llevas *${Math.abs(dias)} días de atraso* desde el ${diaVencimiento} de ${mesNombre}` }
+  if (dias === 0) return { dias: 0, texto: `hoy vence (dia ${diaVencimiento} de ${mesNombre})` }
+  if (dias > 0) return { dias, texto: `faltan *${dias} dias* - vence el ${diaVencimiento} de ${mesNombre}` }
+  return { dias, texto: `llevas *${Math.abs(dias)} dias de atraso* desde el ${diaVencimiento} de ${mesNombre}` }
 }
 
 function formatFecha(iso: string): string {
@@ -55,32 +41,33 @@ function formatCLPLocal(n: number): string {
 }
 
 export async function POST(req: NextRequest) {
+  // Parse URL-encoded body from Twilio
+  let body: Record<string, string> = {}
   try {
-    const body = await parseTwilioBody(req)
-    const fromRaw = body['From'] ?? ''
-    const messageBody = (body['Body'] ?? '')
-      .trim()
-      .toUpperCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-
-    const phone = fromRaw.replace('whatsapp:', '')
-    if (!phone) {
-      return twiml('Error: número no identificado.')
+    const text = await req.text()
+    for (const pair of text.split('&')) {
+      const idx = pair.indexOf('=')
+      if (idx === -1) continue
+      body[decodeURIComponent(pair.slice(0, idx))] = decodeURIComponent(pair.slice(idx + 1)).replace(/\+/g, ' ')
     }
+  } catch {
+    return twiml('Error al procesar mensaje.')
+  }
 
+  const fromRaw = body['From'] ?? ''
+  const phone = fromRaw.replace('whatsapp:', '').replace(/\s/g, '')
+  const messageBody = (body['Body'] ?? '').trim().toUpperCase()
+
+  if (!phone) return twiml('Numero no identificado.')
+
+  try {
     const admin = createAdminClient()
 
-    const { data: propiedades, error: dbError } = await admin
+    const { data: propiedades } = await admin
       .from('propiedades')
       .select('id, nombre, dia_vencimiento, valor_uf, moneda, arrendatario_informal_nombre, arrendatario_informal_celular, arrendatario_informal_cobro_tipo, arrendatario_informal_fecha_inicio, arrendatario_informal_fecha_fin')
       .eq('activa', true)
       .not('arrendatario_informal_celular', 'is', null)
-
-    if (dbError) {
-      console.error('DB error in webhook:', dbError)
-      return twiml('Error interno. Intenta de nuevo más tarde.')
-    }
 
     const propiedad = (propiedades ?? []).find(p => {
       const stored = (p.arrendatario_informal_celular ?? '').replace(/\D/g, '')
@@ -89,7 +76,6 @@ export async function POST(req: NextRequest) {
     })
 
     if (!propiedad) {
-      // Unknown sender — silent 200
       return new NextResponse('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
         status: 200,
         headers: { 'Content-Type': 'text/xml' },
@@ -99,15 +85,15 @@ export async function POST(req: NextRequest) {
     const nombre = propiedad.arrendatario_informal_nombre ?? 'arrendatario'
     const diaVencimiento = propiedad.dia_vencimiento ?? 5
 
-    if (messageBody === 'SI' || messageBody === 'S') {
-      await admin
-        .from('propiedades')
-        .update({ whatsapp_estado: 'confirmado' })
-        .eq('id', propiedad.id)
+    // Normalize: remove accents, uppercase
+    const msgNorm = messageBody.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
+    if (msgNorm === 'SI' || msgNorm === 'S') {
+      await admin.from('propiedades').update({ whatsapp_estado: 'confirmado' }).eq('id', propiedad.id)
 
       const { texto: diasTexto, dias } = diasHastaVencimiento(diaVencimiento)
 
-      let montoTexto = ''
+      let montoTexto = `${propiedad.valor_uf} ${propiedad.moneda}`
       if (propiedad.moneda === 'CLP') {
         montoTexto = formatCLPLocal(propiedad.valor_uf)
       } else {
@@ -115,60 +101,45 @@ export async function POST(req: NextRequest) {
           const ufVal = await getUFValue()
           const clp = Math.round(propiedad.valor_uf * ufVal)
           montoTexto = `${propiedad.valor_uf.toFixed(2)} UF (${formatCLPLocal(clp)})`
-        } catch {
-          montoTexto = `${propiedad.valor_uf.toFixed(2)} UF`
-        }
+        } catch { /* keep default */ }
       }
 
       const cobroTipo = propiedad.arrendatario_informal_cobro_tipo === 'atrasado'
-        ? 'mes vencido (pagas el mes siguiente)'
-        : 'mes adelantado (pagas al inicio del mes)'
+        ? 'mes vencido'
+        : 'mes adelantado'
 
-      let duracionTexto = ''
+      let duracion = ''
       if (propiedad.arrendatario_informal_fecha_inicio && propiedad.arrendatario_informal_fecha_fin) {
         const fin = new Date(propiedad.arrendatario_informal_fecha_fin + 'T12:00:00')
         const hoy = new Date()
-        const mesesRestantes = (fin.getFullYear() - hoy.getFullYear()) * 12 + (fin.getMonth() - hoy.getMonth())
-        duracionTexto =
-          `\nContrato: ${formatFecha(propiedad.arrendatario_informal_fecha_inicio)} al ${formatFecha(propiedad.arrendatario_informal_fecha_fin)}` +
-          (mesesRestantes > 0 ? `\nDuración restante: ${mesesRestantes} meses` : '\nAtención: contrato ya venció')
-      } else if (propiedad.arrendatario_informal_fecha_inicio) {
-        duracionTexto = `\nInicio contrato: ${formatFecha(propiedad.arrendatario_informal_fecha_inicio)}`
+        const meses = (fin.getFullYear() - hoy.getFullYear()) * 12 + (fin.getMonth() - hoy.getMonth())
+        duracion = `\nContrato: ${formatFecha(propiedad.arrendatario_informal_fecha_inicio)} al ${formatFecha(propiedad.arrendatario_informal_fecha_fin)}`
+        duracion += meses > 0 ? `\nDuracion restante: ${meses} meses` : '\nAtencion: contrato vencido'
       }
 
-      const estadoPago = dias < 0
-        ? `\n\nATENCION: ${diasTexto}. Por favor regulariza tu situación.`
+      const pago = dias < 0
+        ? `\n\nATENCION: ${diasTexto}. Regulariza tu situacion.`
         : `\n\nProximo pago: ${diasTexto}.`
 
       return twiml(
-        `Bienvenido, ${nombre}! Ya estas conectado a los recordatorios de *${propiedad.nombre}*.\n\n` +
-        `Arriendo mensual: *${montoTexto}*\n` +
-        `Dia de vencimiento: *dia ${diaVencimiento}* de cada mes\n` +
-        `Tipo de cobro: ${cobroTipo}` +
-        duracionTexto +
-        estadoPago
+        `Listo, ${nombre}! Quedaste conectado a los recordatorios de *${propiedad.nombre}*.\n\n` +
+        `Arriendo: *${montoTexto}*\n` +
+        `Vencimiento: *dia ${diaVencimiento}* de cada mes\n` +
+        `Cobro: ${cobroTipo}` +
+        duracion + pago
       )
     }
 
-    if (messageBody === 'NO' || messageBody === 'N') {
-      await admin
-        .from('propiedades')
-        .update({ whatsapp_estado: 'rechazado' })
-        .eq('id', propiedad.id)
-
-      return twiml(
-        `Entendido, ${nombre}. Tu decision fue registrada y sera comunicada a tu arrendador. Si cambias de opinion, puedes contactarlo directamente.`
-      )
+    if (msgNorm === 'NO' || msgNorm === 'N') {
+      await admin.from('propiedades').update({ whatsapp_estado: 'rechazado' }).eq('id', propiedad.id)
+      return twiml(`Entendido, ${nombre}. Tu decision fue registrada y sera comunicada a tu arrendador.`)
     }
 
     return twiml(
-      `Hola ${nombre}! Para confirmar o rechazar los recordatorios de arriendo de *${propiedad.nombre}*, escribe:\n*SI* para confirmar\n*NO* para rechazar`
+      `Hola ${nombre}! Responde *SI* para confirmar o *NO* para rechazar los recordatorios de *${propiedad.nombre}*.`
     )
   } catch (err) {
-    console.error('WhatsApp webhook error:', err)
-    return new NextResponse('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
-      status: 200,
-      headers: { 'Content-Type': 'text/xml' },
-    })
+    console.error('Webhook error:', err)
+    return twiml('Error interno. Intenta de nuevo.')
   }
 }
