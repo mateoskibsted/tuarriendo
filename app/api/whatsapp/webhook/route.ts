@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getUFValue } from '@/lib/utils/uf'
+import { revalidatePath } from 'next/cache'
 
 async function parseTwilioBody(req: NextRequest): Promise<Record<string, string>> {
   const text = await req.text()
@@ -85,6 +86,8 @@ export async function POST(req: NextRequest) {
         .from('propiedades')
         .update({ whatsapp_estado: 'confirmado' })
         .eq('id', propiedad.id)
+      revalidatePath(`/arrendador/propiedades/${propiedad.id}`)
+      revalidatePath('/arrendador')
 
       // Build detailed welcome message
       const { dias, texto: diasTexto } = diasHastaVencimiento(diaVencimiento)
@@ -139,6 +142,8 @@ export async function POST(req: NextRequest) {
         .from('propiedades')
         .update({ whatsapp_estado: 'rechazado' })
         .eq('id', propiedad.id)
+      revalidatePath(`/arrendador/propiedades/${propiedad.id}`)
+      revalidatePath('/arrendador')
 
       return twiml(
         `Entendido, ${nombre}. Tu decisión fue registrada y será comunicada a tu arrendador. Si cambias de opinión, puedes contactarlo directamente.`
