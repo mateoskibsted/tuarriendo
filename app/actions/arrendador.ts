@@ -4,6 +4,16 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { v4 as uuidv4 } from 'uuid'
+import { cleanRut } from '@/lib/utils/rut'
+
+function normalizePhone(raw: string): string | null {
+  if (!raw?.trim()) return null
+  const digits = raw.replace(/\D/g, '')
+  if (digits.startsWith('56') && digits.length === 11) return `+${digits}`
+  if (digits.startsWith('9') && digits.length === 9) return `+56${digits}`
+  if (digits.length === 8) return `+569${digits}`
+  return raw.trim()
+}
 
 /** Devuelve el user autenticado y el cliente admin. */
 async function getAuthContext() {
@@ -200,13 +210,16 @@ export async function guardarArrendatarioInformal(propiedadId: string, formData:
 
   const multaMonto = formData.get('multa_monto') as string
 
+  const rutRaw = (formData.get('rut') as string)?.trim()
+  const celularRaw = (formData.get('celular') as string)?.trim()
+
   const { error } = await admin
     .from('propiedades')
     .update({
       arrendatario_informal_nombre: (formData.get('nombre') as string).trim(),
-      arrendatario_informal_rut: (formData.get('rut') as string)?.trim() || null,
+      arrendatario_informal_rut: rutRaw ? cleanRut(rutRaw) : null,
       arrendatario_informal_email: (formData.get('email') as string)?.trim() || null,
-      arrendatario_informal_celular: (formData.get('celular') as string)?.trim() || null,
+      arrendatario_informal_celular: normalizePhone(celularRaw),
       valor_uf: parseFloat(formData.get('valor_uf') as string),
       moneda: formData.get('moneda') as string,
       dia_vencimiento: parseInt(formData.get('dia_vencimiento') as string) || 5,

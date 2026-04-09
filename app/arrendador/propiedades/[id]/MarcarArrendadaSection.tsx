@@ -4,6 +4,29 @@ import { useState, useTransition } from 'react'
 import { guardarArrendatarioInformal, limpiarArrendatarioInformal } from '@/app/actions/arrendador'
 import type { Moneda, Propiedad } from '@/lib/types'
 import { formatUF, formatCLP } from '@/lib/utils/uf'
+import { formatRut, cleanRut } from '@/lib/utils/rut'
+
+function formatPhone(raw: string): string {
+  const digits = raw.replace(/\D/g, '')
+  if (digits.startsWith('56') && digits.length === 11) {
+    return `+56 9 ${digits.slice(3, 7)} ${digits.slice(7)}`
+  }
+  if (digits.startsWith('9') && digits.length === 9) {
+    return `+56 9 ${digits.slice(1, 5)} ${digits.slice(5)}`
+  }
+  if (digits.length === 8) {
+    return `+56 9 ${digits.slice(0, 4)} ${digits.slice(4)}`
+  }
+  return raw
+}
+
+function normalizePhone(raw: string): string {
+  const digits = raw.replace(/\D/g, '')
+  if (digits.startsWith('56') && digits.length === 11) return `+${digits}`
+  if (digits.startsWith('9') && digits.length === 9) return `+56${digits}`
+  if (digits.length === 8) return `+569${digits}`
+  return raw
+}
 
 type Props = Pick<Propiedad,
   'id' | 'valor_uf' | 'moneda' | 'dia_vencimiento' | 'multa_monto' | 'multa_moneda' |
@@ -27,6 +50,8 @@ export default function MarcarArrendadaSection(props: Props) {
   const [moneda, setMoneda] = useState<Moneda>(props.moneda ?? 'UF')
   const [multaMoneda, setMultaMoneda] = useState<Moneda>(props.multa_moneda ?? 'UF')
   const [tieneMulta, setTieneMulta] = useState(!!props.multa_monto)
+  const [rutInput, setRutInput] = useState(props.arrendatario_informal_rut ? formatRut(props.arrendatario_informal_rut) : '')
+  const [phoneInput, setPhoneInput] = useState(props.arrendatario_informal_celular ?? '')
   const [error, setError] = useState('')
   const [isPending, startTransition] = useTransition()
 
@@ -64,16 +89,20 @@ export default function MarcarArrendadaSection(props: Props) {
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <InfoFila label="Nombre" value={props.arrendatario_informal_nombre} />
-          <InfoFila label="RUT" value={props.arrendatario_informal_rut} />
+          <InfoFila label="RUT" value={props.arrendatario_informal_rut ? formatRut(props.arrendatario_informal_rut) : undefined} />
           <InfoFila label="Email" value={props.arrendatario_informal_email} />
-          <InfoFila label="WhatsApp" value={props.arrendatario_informal_celular} />
+          <InfoFila label="WhatsApp" value={props.arrendatario_informal_celular ? formatPhone(props.arrendatario_informal_celular) : undefined} />
           <InfoFila label="Valor mensual" value={valorTexto} />
           <InfoFila label="Día de vencimiento" value={`Día ${props.dia_vencimiento} de cada mes`} />
           {multaTexto && <InfoFila label="Multa diaria por atraso" value={multaTexto} />}
         </div>
         <div className="flex gap-3 pt-2 border-t border-gray-100">
           <button
-            onClick={() => setEditando(true)}
+            onClick={() => {
+              setRutInput(props.arrendatario_informal_rut ? formatRut(props.arrendatario_informal_rut) : '')
+              setPhoneInput(props.arrendatario_informal_celular ?? '')
+              setEditando(true)
+            }}
             className="text-sm text-blue-600 hover:underline"
           >
             Editar datos
@@ -112,7 +141,11 @@ export default function MarcarArrendadaSection(props: Props) {
             <label className="block text-sm font-medium text-gray-700 mb-1">RUT</label>
             <input
               name="rut"
-              defaultValue={props.arrendatario_informal_rut ?? ''}
+              value={rutInput}
+              onChange={e => {
+                const raw = cleanRut(e.target.value)
+                setRutInput(raw.length > 1 ? formatRut(raw) : raw)
+              }}
               placeholder="12.345.678-9"
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
@@ -134,7 +167,12 @@ export default function MarcarArrendadaSection(props: Props) {
             <input
               name="celular"
               type="tel"
-              defaultValue={props.arrendatario_informal_celular ?? ''}
+              value={phoneInput}
+              onChange={e => setPhoneInput(e.target.value)}
+              onBlur={e => {
+                const v = e.target.value.trim()
+                if (v) setPhoneInput(formatPhone(v))
+              }}
               placeholder="+56 9 1234 5678"
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
