@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { guardarArrendatarioInformal, limpiarArrendatarioInformal } from '@/app/actions/arrendador'
-import type { Moneda, CobroTipo, Propiedad } from '@/lib/types'
+import type { Moneda, CobroTipo, Propiedad, WhatsAppEstado } from '@/lib/types'
 import { formatUF, formatCLP } from '@/lib/utils/uf'
 import { formatRut, cleanRut } from '@/lib/utils/rut'
 
@@ -32,8 +32,15 @@ type Props = Pick<Propiedad,
   'id' | 'valor_uf' | 'moneda' | 'dia_vencimiento' | 'multa_monto' | 'multa_moneda' |
   'arrendatario_informal_nombre' | 'arrendatario_informal_rut' |
   'arrendatario_informal_email' | 'arrendatario_informal_celular' |
-  'arrendatario_informal_cobro_tipo' | 'arrendatario_informal_fecha_inicio' | 'arrendatario_informal_fecha_fin'
+  'arrendatario_informal_cobro_tipo' | 'arrendatario_informal_fecha_inicio' | 'arrendatario_informal_fecha_fin' |
+  'whatsapp_estado'
 >
+
+const WHATSAPP_BADGE: Record<WhatsAppEstado, { label: string; className: string }> = {
+  pendiente: { label: '⏳ WhatsApp pendiente', className: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+  confirmado: { label: '✅ WhatsApp confirmado', className: 'bg-green-50 text-green-700 border-green-200' },
+  rechazado: { label: '❌ WhatsApp rechazado', className: 'bg-red-50 text-red-700 border-red-200' },
+}
 
 function InfoFila({ label, value }: { label: string; value?: string | null }) {
   if (!value) return null
@@ -87,13 +94,42 @@ export default function MarcarArrendadaSection(props: Props) {
 
   // --- Read mode (has arrendatario, not editing) ---
   if (tiene && !editando) {
+    const waEstado = props.whatsapp_estado as WhatsAppEstado | null | undefined
+    const waBadge = waEstado ? WHATSAPP_BADGE[waEstado] : null
+
     return (
       <div className="space-y-4">
+        {/* WhatsApp rejection alert */}
+        {waEstado === 'rechazado' && (
+          <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-start gap-2">
+            <span className="text-red-500 shrink-0 mt-0.5">⚠️</span>
+            <div>
+              <p className="text-sm font-medium text-red-800">El arrendatario rechazó los recordatorios por WhatsApp</p>
+              <p className="text-xs text-red-600 mt-0.5">
+                {props.arrendatario_informal_nombre} no recibirá avisos de pago por esta vía.
+                Puedes contactarlo directamente o editar sus datos si cambia de opinión.
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-4">
           <InfoFila label="Nombre" value={props.arrendatario_informal_nombre} />
           <InfoFila label="RUT" value={props.arrendatario_informal_rut ? formatRut(props.arrendatario_informal_rut) : undefined} />
           <InfoFila label="Email" value={props.arrendatario_informal_email} />
-          <InfoFila label="WhatsApp" value={props.arrendatario_informal_celular ? formatPhone(props.arrendatario_informal_celular) : undefined} />
+          <div>
+            <p className="text-xs text-gray-500 mb-0.5">WhatsApp</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="text-sm font-medium text-gray-900">
+                {props.arrendatario_informal_celular ? formatPhone(props.arrendatario_informal_celular) : '—'}
+              </p>
+              {waBadge && (
+                <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${waBadge.className}`}>
+                  {waBadge.label}
+                </span>
+              )}
+            </div>
+          </div>
           <InfoFila label="Valor mensual" value={valorTexto} />
           <InfoFila label="Día de vencimiento" value={`Día ${props.dia_vencimiento} de cada mes`} />
           <InfoFila label="Tipo de cobro" value={props.arrendatario_informal_cobro_tipo === 'atrasado' ? 'Mes atrasado (cobra el mes siguiente)' : 'Mes adelantado (cobra al inicio del mes)'} />

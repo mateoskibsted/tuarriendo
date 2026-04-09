@@ -372,7 +372,7 @@ export async function confirmarPagoEmail(
     .select('id')
     .eq('contrato_id', contratoId)
     .eq('periodo', periodo)
-    .single()
+    .maybeSingle()
 
   const payload = {
     contrato_id: contratoId,
@@ -385,14 +385,29 @@ export async function confirmarPagoEmail(
     email_origen: emailId ? `https://mail.google.com/mail/u/0/#all/${emailId}` : null,
   }
 
+  let dbError
   if (existing) {
-    await admin.from('pagos').update(payload).eq('id', existing.id)
+    const { error } = await admin.from('pagos').update(payload).eq('id', existing.id)
+    dbError = error
   } else {
-    await admin.from('pagos').insert(payload)
+    const { error } = await admin.from('pagos').insert(payload)
+    dbError = error
   }
+
+  if (dbError) return { error: dbError.message }
+
+  // Fetch the contrato's propiedad_id to revalidate the property page
+  const { data: contratoProp } = await admin
+    .from('contratos')
+    .select('propiedad_id')
+    .eq('id', contratoId)
+    .single()
 
   revalidatePath('/arrendador')
   revalidatePath('/arrendador/email')
+  if (contratoProp?.propiedad_id) {
+    revalidatePath(`/arrendador/propiedades/${contratoProp.propiedad_id}`)
+  }
   return { success: true }
 }
 
@@ -434,11 +449,16 @@ export async function confirmarPagoEmailInformal(
     email_origen: emailId ? `https://mail.google.com/mail/u/0/#all/${emailId}` : null,
   }
 
+  let dbError
   if (existing) {
-    await admin.from('pagos').update(payload).eq('id', existing.id)
+    const { error } = await admin.from('pagos').update(payload).eq('id', existing.id)
+    dbError = error
   } else {
-    await admin.from('pagos').insert(payload)
+    const { error } = await admin.from('pagos').insert(payload)
+    dbError = error
   }
+
+  if (dbError) return { error: dbError.message }
 
   revalidatePath('/arrendador')
   revalidatePath(`/arrendador/propiedades/${propiedadId}`)

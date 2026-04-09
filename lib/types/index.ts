@@ -13,6 +13,7 @@ export interface Profile {
 
 export type Moneda = 'UF' | 'CLP'
 export type CobroTipo = 'adelantado' | 'atrasado'
+export type WhatsAppEstado = 'pendiente' | 'confirmado' | 'rechazado'
 
 export interface Propiedad {
   id: string
@@ -33,6 +34,7 @@ export interface Propiedad {
   arrendatario_informal_cobro_tipo?: CobroTipo | null
   arrendatario_informal_fecha_inicio?: string | null
   arrendatario_informal_fecha_fin?: string | null
+  whatsapp_estado?: WhatsAppEstado | null
   created_at: string
 }
 

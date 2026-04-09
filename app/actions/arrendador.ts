@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { v4 as uuidv4 } from 'uuid'
 import { cleanRut } from '@/lib/utils/rut'
+import { enviarWhatsApp } from '@/lib/utils/twilio'
 
 function normalizePhone(raw: string): string | null {
   if (!raw?.trim()) return null
@@ -38,18 +39,43 @@ export async function crearPropiedad(formData: FormData) {
     return { error: `Límite máximo de ${MAX_PROPIEDADES} propiedades alcanzado` }
   }
 
+  const arrendatarioNombre = (formData.get('arrendatario_nombre') as string)?.trim()
+  const tieneArrendatario = !!arrendatarioNombre
+
   const multaMonto = formData.get('multa_monto') as string
-  const { error } = await admin.from('propiedades').insert({
+  const valorUfRaw = formData.get('valor_uf') as string
+
+  const campos: Record<string, unknown> = {
     arrendador_id: user.id,
     nombre: formData.get('nombre') as string,
     direccion: formData.get('direccion') as string,
-    descripcion: formData.get('descripcion') as string,
-    valor_uf: parseFloat(formData.get('valor_uf') as string),
-    moneda: formData.get('moneda') as string,
-    dia_vencimiento: parseInt(formData.get('dia_vencimiento') as string) || 5,
-    multa_monto: multaMonto ? parseFloat(multaMonto) : null,
-    multa_moneda: formData.get('multa_moneda') as string,
-  })
+    descripcion: (formData.get('descripcion') as string) || null,
+  }
+
+  if (tieneArrendatario) {
+    const rutRaw = (formData.get('arrendatario_rut') as string)?.trim()
+    const celularRaw = (formData.get('arrendatario_celular') as string)?.trim()
+    const fechaInicio = (formData.get('fecha_inicio') as string)?.trim()
+    const fechaFin = (formData.get('fecha_fin') as string)?.trim()
+
+    campos.arrendatario_informal_nombre = arrendatarioNombre
+    campos.arrendatario_informal_rut = rutRaw ? cleanRut(rutRaw) : null
+    campos.arrendatario_informal_email = (formData.get('arrendatario_email') as string)?.trim() || null
+    campos.arrendatario_informal_celular = normalizePhone(celularRaw ?? '')
+    campos.arrendatario_informal_cobro_tipo = (formData.get('cobro_tipo') as string) || 'adelantado'
+    campos.arrendatario_informal_fecha_inicio = fechaInicio || null
+    campos.arrendatario_informal_fecha_fin = fechaFin || null
+
+    if (valorUfRaw) {
+      campos.valor_uf = parseFloat(valorUfRaw)
+      campos.moneda = formData.get('moneda') as string
+      campos.dia_vencimiento = parseInt(formData.get('dia_vencimiento') as string) || 5
+      campos.multa_monto = multaMonto ? parseFloat(multaMonto) : null
+      campos.multa_moneda = (formData.get('multa_moneda') as string) || null
+    }
+  }
+
+  const { error } = await admin.from('propiedades').insert(campos)
 
   if (error) return { error: error.message }
 
@@ -217,32 +243,61 @@ export async function guardarArrendatarioInformal(propiedadId: string, formData:
   if (!user) return { error: 'No autenticado' }
 
   const multaMonto = formData.get('multa_monto') as string
-
   const rutRaw = (formData.get('rut') as string)?.trim()
   const celularRaw = (formData.get('celular') as string)?.trim()
   const fechaInicio = (formData.get('fecha_inicio') as string)?.trim()
   const fechaFin = (formData.get('fecha_fin') as string)?.trim()
+  const nombre = (formData.get('nombre') as string).trim()
+  const celularNorm = normalizePhone(celularRaw)
+  const diaVencimiento = parseInt(formData.get('dia_vencimiento') as string) || 5
+
+  // Check if phone changed vs what's currently saved
+  const { data: propiedadActual } = await admin
+    .from('propiedades')
+    .select('arrendatario_informal_celular, nombre')
+    .eq('id', propiedadId)
+    .eq('arrendador_id', user.id)
+    .single()
+
+  if (!propiedadActual) return { error: 'Propiedad no encontrada' }
+
+  const celularCambio = celularNorm && celularNorm !== propiedadActual.arrendatario_informal_celular
 
   const { error } = await admin
     .from('propiedades')
     .update({
-      arrendatario_informal_nombre: (formData.get('nombre') as string).trim(),
+      arrendatario_informal_nombre: nombre,
       arrendatario_informal_rut: rutRaw ? cleanRut(rutRaw) : null,
       arrendatario_informal_email: (formData.get('email') as string)?.trim() || null,
-      arrendatario_informal_celular: normalizePhone(celularRaw),
+      arrendatario_informal_celular: celularNorm,
       arrendatario_informal_cobro_tipo: formData.get('cobro_tipo') as string || 'adelantado',
       arrendatario_informal_fecha_inicio: fechaInicio || null,
       arrendatario_informal_fecha_fin: fechaFin || null,
       valor_uf: parseFloat(formData.get('valor_uf') as string),
       moneda: formData.get('moneda') as string,
-      dia_vencimiento: parseInt(formData.get('dia_vencimiento') as string) || 5,
+      dia_vencimiento: diaVencimiento,
       multa_monto: multaMonto ? parseFloat(multaMonto) : null,
       multa_moneda: formData.get('multa_moneda') as string,
+      // Reset whatsapp_estado when phone changes
+      ...(celularCambio ? { whatsapp_estado: 'pendiente' } : {}),
     })
     .eq('id', propiedadId)
     .eq('arrendador_id', user.id)
 
   if (error) return { error: error.message }
+
+  // Send WhatsApp confirmation if phone is new or changed
+  if (celularCambio && celularNorm) {
+    const propiedadNombre = propiedadActual.nombre
+    const mensaje =
+      `Hola ${nombre} 👋\n\n` +
+      `Tu arrendador te ha registrado como arrendatario de *${propiedadNombre}*.\n\n` +
+      `A partir de ahora podrías recibir recordatorios de pago de arriendo por WhatsApp.\n\n` +
+      `¿Estás de acuerdo?\n` +
+      `✅ Responde *SI* para confirmar\n` +
+      `❌ Responde *NO* para rechazar`
+    await enviarWhatsApp(celularNorm, mensaje)
+  }
 
   revalidatePath(`/arrendador/propiedades/${propiedadId}`)
   revalidatePath('/arrendador')
