@@ -13,6 +13,7 @@ import PagosSection from './PagosSection'
 import ContratoSection from './ContratoSection'
 import DesvincularButton from './DesvincularButton'
 import MarcarArrendadaSection from './MarcarArrendadaSection'
+import TelefonoArrendatarioForm from './TelefonoArrendatarioForm'
 
 export default async function PropiedadPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -31,7 +32,7 @@ export default async function PropiedadPage({ params }: { params: Promise<{ id: 
 
   const { data: contrato } = await admin
     .from('contratos')
-    .select('*, profiles!contratos_arrendatario_id_fkey(nombre, rut, email)')
+    .select('*, profiles!contratos_arrendatario_id_fkey(id, nombre, rut, email, telefono)')
     .eq('propiedad_id', id)
     .eq('activo', true)
     .maybeSingle()
@@ -53,7 +54,7 @@ export default async function PropiedadPage({ params }: { params: Promise<{ id: 
     : { data: [] }
 
   const arrendatario = contrato
-    ? (contrato as { profiles: { nombre: string; rut: string; email: string } }).profiles
+    ? (contrato as { profiles: { id: string; nombre: string; rut: string; email: string; telefono?: string } }).profiles
     : null
 
   return (
@@ -104,6 +105,12 @@ export default async function PropiedadPage({ params }: { params: Promise<{ id: 
                 <InfoRow label="Desde" value={new Date(contrato.fecha_inicio).toLocaleDateString('es-CL')} />
                 <InfoRow label="Día de pago" value={`Día ${contrato.dia_pago} de cada mes`} />
                 <InfoRow label="Valor pactado" value={`${formatUF(contrato.valor_uf)} UF/mes`} />
+              </div>
+              <div className="pt-3 border-t border-gray-100">
+                <TelefonoArrendatarioForm
+                  arrendatarioId={arrendatario.id}
+                  telefonoActual={arrendatario.telefono}
+                />
               </div>
               <div className="pt-2 border-t border-gray-100 flex items-center gap-3">
                 <ContratoSection contratoId={contrato.id} valorUf={contrato.valor_uf} diaPago={contrato.dia_pago} />

@@ -234,6 +234,33 @@ export async function limpiarArrendatarioInformal(propiedadId: string) {
   return { success: true }
 }
 
+export async function actualizarTelefonoArrendatario(arrendatarioId: string, telefono: string) {
+  const { user, admin } = await getAuthContext()
+  if (!user) return { error: 'No autenticado' }
+
+  // Verify this arrendatario belongs to one of this arrendador's active contracts
+  const { data: contrato } = await admin
+    .from('contratos')
+    .select('id, propiedades(arrendador_id)')
+    .eq('arrendatario_id', arrendatarioId)
+    .eq('activo', true)
+    .single()
+
+  const arrendadorId = (contrato as unknown as { propiedades?: { arrendador_id: string } } | null)
+    ?.propiedades?.arrendador_id
+
+  if (!contrato || arrendadorId !== user.id) return { error: 'No autorizado' }
+
+  const { error } = await admin
+    .from('profiles')
+    .update({ telefono: telefono.trim() || null })
+    .eq('id', arrendatarioId)
+
+  if (error) return { error: error.message }
+  revalidatePath('/arrendador/propiedades')
+  return { success: true }
+}
+
 export async function desvincularArrendatario(contratoId: string) {
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }
