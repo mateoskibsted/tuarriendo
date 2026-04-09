@@ -22,6 +22,7 @@ export default function PagosDetectadosAuto() {
   const [confirming, setConfirming] = useState<string | null>(null)
   const [confirmed, setConfirmed] = useState<Set<string>>(new Set())
   const [errorMsg, setErrorMsg] = useState('')
+  const [montos, setMontos] = useState<Record<string, string>>({})
 
   useEffect(() => {
     escanearEmails().then(result => {
@@ -29,19 +30,19 @@ export default function PagosDetectadosAuto() {
         setErrorMsg(result.error)
         setEstado('error')
       } else {
-        // Only show suggestions with at least a detected amount
-        setSugerencias((result.sugerencias ?? []).filter(s => !!s.monto_clp))
+          setSugerencias(result.sugerencias ?? [])
         setEstado('listo')
       }
     })
   }, [])
 
   async function handleConfirmar(s: PagoSugerido) {
-    if (!s.monto_clp) return
+    const monto = s.monto_clp ?? parseInt(montos[s.emailId] ?? '0')
+    if (!monto) return
     setConfirming(s.emailId)
     const result = s.contrato_id
-      ? await confirmarPagoEmail(s.contrato_id, s.monto_clp, s.periodo)
-      : await confirmarPagoEmailInformal(s.propiedad_id!, s.monto_clp, s.periodo)
+      ? await confirmarPagoEmail(s.contrato_id, monto, s.periodo)
+      : await confirmarPagoEmailInformal(s.propiedad_id!, monto, s.periodo)
     setConfirming(null)
     if (result.error) {
       alert(result.error)
@@ -92,9 +93,19 @@ export default function PagosDetectadosAuto() {
           <div className="divide-y divide-gray-100">
             {pendientes.map(s => (
               <div key={s.emailId} className="px-4 py-3 flex items-center justify-between gap-4">
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-gray-900">{formatCLPLocal(s.monto_clp!)}</span>
+                    {s.monto_clp ? (
+                      <span className="font-semibold text-gray-900">{formatCLPLocal(s.monto_clp)}</span>
+                    ) : (
+                      <input
+                        type="number"
+                        placeholder="Monto CLP"
+                        value={montos[s.emailId] ?? ''}
+                        onChange={e => setMontos(prev => ({ ...prev, [s.emailId]: e.target.value }))}
+                        className="w-36 border border-gray-300 rounded px-2 py-1 text-sm font-semibold"
+                      />
+                    )}
                     {s.banco && <span className="text-xs text-gray-500">{s.banco}</span>}
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${CONFIANZA_COLOR[s.confianza]}`}>
                       {s.confianza === 'alta' ? 'RUT coincide' : 'Nombre similar'}
@@ -109,7 +120,7 @@ export default function PagosDetectadosAuto() {
                 ) : (
                   <button
                     onClick={() => handleConfirmar(s)}
-                    disabled={confirming === s.emailId}
+                    disabled={confirming === s.emailId || (!s.monto_clp && !montos[s.emailId])}
                     className="shrink-0 text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors"
                   >
                     {confirming === s.emailId ? 'Registrando...' : 'Confirmar pago'}

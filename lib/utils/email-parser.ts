@@ -104,8 +104,13 @@ export function extractTextFromPayload(payload: {
 
   if (payload.mimeType === 'text/html' && payload.body?.data) {
     const html = decodeBase64Url(payload.body.data)
-    // Strip tags for basic text extraction
-    return html.replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ')
+    // Strip style/script blocks first, then tags
+    return html
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
   }
 
   return ''
