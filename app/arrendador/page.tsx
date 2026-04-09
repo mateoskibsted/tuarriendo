@@ -35,33 +35,33 @@ export default async function ArrendadorDashboard() {
 
   const contratoIds = (contratos ?? []).map((c: Contrato) => c.id)
 
-  // Pagos confirmados este mes
-  const { data: pagosEsteMes } = contratoIds.length > 0
+  // Pagos confirmados este mes — formales (por contrato)
+  const { data: pagosFormalesEsteMes } = contratoIds.length > 0
     ? await admin
         .from('pagos')
-        .select('contrato_id, estado')
+        .select('contrato_id')
         .in('contrato_id', contratoIds)
         .eq('periodo', mesActual)
         .eq('estado', 'pagado')
     : { data: [] }
 
-  const pagosEsteMesSet = new Set((pagosEsteMes ?? []).map((p: { contrato_id: string }) => p.contrato_id))
+  const pagosEsteMesSet = new Set((pagosFormalesEsteMes ?? []).map((p: { contrato_id: string }) => p.contrato_id))
 
-  const { data: pagosPendientes } = contratoIds.length > 0
+  // Pagos confirmados este mes — informales (por propiedad)
+  const propiedadesInformalesIds = (propiedades ?? [])
+    .filter((p: Propiedad) => !!(p as Propiedad & { arrendatario_informal_nombre?: string }).arrendatario_informal_nombre && !(contratos ?? []).find((c: Contrato) => c.propiedad_id === p.id))
+    .map((p: Propiedad) => p.id)
+
+  const { data: pagosInformalesEsteMes } = propiedadesInformalesIds.length > 0
     ? await admin
         .from('pagos')
-        .select('id')
-        .in('contrato_id', contratoIds)
-        .eq('estado', 'pendiente')
+        .select('propiedad_id')
+        .in('propiedad_id', propiedadesInformalesIds)
+        .eq('periodo', mesActual)
+        .eq('estado', 'pagado')
     : { data: [] }
 
-  const { data: pagosAtrasados } = contratoIds.length > 0
-    ? await admin
-        .from('pagos')
-        .select('id')
-        .in('contrato_id', contratoIds)
-        .eq('estado', 'atrasado')
-    : { data: [] }
+  const propiedadesPagadasSet = new Set((pagosInformalesEsteMes ?? []).map((p: { propiedad_id: string }) => p.propiedad_id))
 
   // Check if Gmail is connected
   const { data: emailConnection } = await admin
@@ -72,8 +72,8 @@ export default async function ArrendadorDashboard() {
 
   const totalPropiedades = propiedades?.length ?? 0
   const puedeAgregarMas = totalPropiedades < MAX_PROPIEDADES
-  const propiedadesConInquilino = (contratos ?? []).length
-  const pagadosEsteMes = pagosEsteMes?.length ?? 0
+  const propiedadesConInquilino = (contratos ?? []).length + propiedadesInformalesIds.length
+  const pagadosEsteMes = (pagosFormalesEsteMes?.length ?? 0) + (pagosInformalesEsteMes?.length ?? 0)
 
   return (
     <div className="space-y-6">
@@ -148,20 +148,23 @@ export default async function ArrendadorDashboard() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {propiedades.map((p: Propiedad) => {
             const contrato = (contratos ?? []).find((c: Contrato) => c.propiedad_id === p.id)
-            const tienePago = contrato && pagosEsteMesSet.has(contrato.id)
-            const tieneInformal = !contrato && !!p.arrendatario_informal_nombre
+            const tienePagoFormal = contrato && pagosEsteMesSet.has(contrato.id)
+            const tieneInformal = !contrato && !!(p as Propiedad & { arrendatario_informal_nombre?: string }).arrendatario_informal_nombre
+            const tienePagoInformal = tieneInformal && propiedadesPagadasSet.has(p.id)
 
             return (
               <Link key={p.id} href={`/arrendador/propiedades/${p.id}`}>
                 <Card className="hover:border-blue-300 transition-colors cursor-pointer h-full">
                   <div className="flex justify-between items-start mb-3">
                     <h3 className="font-semibold text-gray-900">{p.nombre}</h3>
-                    {contrato && tienePago ? (
+                    {contrato && tienePagoFormal ? (
                       <Badge variant="green">Pagado</Badge>
                     ) : contrato ? (
                       <Badge variant="yellow">Sin pago</Badge>
+                    ) : tienePagoInformal ? (
+                      <Badge variant="green">Pagado</Badge>
                     ) : tieneInformal ? (
-                      <Badge variant="blue">Arrendada</Badge>
+                      <Badge variant="yellow">Sin pago</Badge>
                     ) : (
                       <Badge variant="gray">Disponible</Badge>
                     )}
