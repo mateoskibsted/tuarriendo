@@ -3,7 +3,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { google } from 'googleapis'
-import Anthropic from '@anthropic-ai/sdk'
 import { revalidatePath } from 'next/cache'
 import { extractTextFromPayload, decodeBase64Url } from '@/lib/utils/email-parser'
 import { getUFValue } from '@/lib/utils/uf'
@@ -36,96 +35,70 @@ function buildOAuthClient(connection: {
   return oauth2Client
 }
 
-/** Use Claude to match emails against tenants, requiring name + amount to both match. */
-async function matchEmailsWithAI(
-  emails: Array<{
-    idx: number
-    asunto: string
-    rawContent: string  // HTML or plain text, truncated
-    monto_clp?: number
-  }>,
+/** Normalize text: lowercase, remove accents and punctuation */
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** Extract all CLP amounts from email content (e.g. $1.500.000 → 1500000) */
+function extractAmounts(content: string): number[] {
+  const matches = [...content.matchAll(/\$\s*([\d]{1,3}(?:[.,][\d]{3})*)/g)]
+  return matches
+    .map(m => parseInt(m[1].replace(/[.,]/g, ''), 10))
+    .filter(n => !isNaN(n) && n > 0)
+}
+
+/** Check if tenant name appears in email content (all words with 3+ chars must match) */
+function nameMatchesContent(tenantName: string, content: string): boolean {
+  const contentNorm = normalizeText(content)
+  const words = normalizeText(tenantName).split(' ').filter(w => w.length >= 3)
+  if (words.length === 0) return false
+  return words.every(word => contentNorm.includes(word))
+}
+
+/** Rule-based matching: name + amount must both match */
+function matchEmails(
+  emails: Array<{ idx: number; rawContent: string }>,
   tenants: Array<{
     idx: number
     contratoId?: string
     propiedadId?: string
     nombre: string
-    rut: string
-    propiedadNombre: string
-    monto_clp: number   // always in CLP for comparison
-    monto_original: number
-    moneda: string
+    monto_clp: number
   }>
-): Promise<Array<{ emailIdx: number; tenantIdx: number; confianza: 'alta' | 'media'; monto_clp?: number }>> {
-  if (emails.length === 0 || tenants.length === 0) return []
+): Array<{ emailIdx: number; tenantIdx: number; confianza: 'alta' | 'media'; monto_clp: number }> {
+  const results: Array<{ emailIdx: number; tenantIdx: number; confianza: 'alta' | 'media'; monto_clp: number }> = []
 
-  const client = new Anthropic()
+  for (const email of emails) {
+    const amounts = extractAmounts(email.rawContent)
 
-  const tenantsText = tenants.map(t =>
-    `[${t.idx}] Nombre: "${t.nombre}" | Monto mensual: $${t.monto_clp.toLocaleString('es-CL')} CLP (${t.monto_original} ${t.moneda}) | Propiedad: ${t.propiedadNombre}`
-  ).join('\n')
+    for (const tenant of tenants) {
+      const nameMatch = nameMatchesContent(tenant.nombre, email.rawContent)
+      if (!nameMatch) continue
 
-  const emailsText = emails.map(e =>
-    `[${e.idx}] Asunto: ${e.asunto}\nContenido:\n${e.rawContent.slice(0, 600)}`
-  ).join('\n\n---\n\n')
+      // Find an amount that matches within ±15%
+      const expected = tenant.monto_clp
+      const matchedAmount = amounts.find(a => {
+        if (expected === 0) return false
+        return Math.abs(a - expected) / expected <= 0.15
+      })
 
-  const prompt = `Eres un asistente que detecta pagos de arriendo en correos bancarios chilenos.
+      if (matchedAmount === undefined) continue
 
-ARRENDATARIOS Y MONTOS ESPERADOS:
-${tenantsText}
+      const confianza: 'alta' | 'media' = Math.abs(matchedAmount - expected) / expected <= 0.05
+        ? 'alta'
+        : 'media'
 
-CORREOS BANCARIOS RECIBIDOS:
-${emailsText}
-
-TAREA: Para cada correo, determina si es un pago de arriendo de algún arrendatario.
-
-REGLAS ESTRICTAS — un correo es un pago solo si cumple AMBAS condiciones:
-1. El nombre del remitente en el correo coincide (exacto o muy similar) con el nombre del arrendatario
-2. El monto transferido en el correo es similar al monto mensual esperado (±10%)
-
-Si solo coincide el nombre pero no el monto, o solo el monto pero no el nombre: NO incluir.
-Si el correo es de pagos propios (compras, servicios, sueldos salientes): NO incluir.
-
-Responde ÚNICAMENTE con JSON válido:
-[
-  {
-    "email": <número>,
-    "arrendatario": <número>,
-    "monto_detectado": <monto en CLP extraído del correo, o null>,
-    "confianza": "alta" (nombre exacto + monto exacto) o "media" (nombre similar + monto aproximado)
+      results.push({ emailIdx: email.idx, tenantIdx: tenant.idx, confianza, monto_clp: matchedAmount })
+    }
   }
-]
 
-Si no hay coincidencias válidas, responde con: []`
-
-  try {
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 600,
-      messages: [{ role: 'user', content: prompt }],
-    })
-
-    const text = response.content[0].type === 'text' ? response.content[0].text : '[]'
-    const jsonMatch = text.match(/\[[\s\S]*\]/)
-    if (!jsonMatch) return []
-
-    const parsed = JSON.parse(jsonMatch[0]) as Array<{
-      email: number
-      arrendatario: number
-      monto_detectado?: number | null
-      confianza: string
-    }>
-
-    return parsed
-      .filter(r => r.confianza === 'alta' || r.confianza === 'media')
-      .map(r => ({
-        emailIdx: r.email,
-        tenantIdx: r.arrendatario,
-        confianza: r.confianza as 'alta' | 'media',
-        monto_clp: r.monto_detectado ?? undefined,
-      }))
-  } catch {
-    return []
-  }
+  return results
 }
 
 /** Recursively find the first text/html part in a Gmail payload */
@@ -325,8 +298,8 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
     }
   }
 
-  // Use Claude AI to match emails with tenants (name + amount required)
-  const matches = await matchEmailsWithAI(parsedEmails, tenantsConCLP)
+  // Rule-based matching: name + amount must both appear in the email
+  const matches = matchEmails(parsedEmails, tenantsConCLP)
 
   // Build final suggestions from AI matches only
   const sugerencias: PagoSugerido[] = matches.map(match => {
@@ -338,7 +311,7 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
       emailId: email.emailId,
       fecha: email.fecha,
       asunto: email.asunto,
-      monto_clp: match.monto_clp ?? tenant.monto_clp,
+      monto_clp: match.monto_clp,
       contrato_id: tenant.contratoId,
       propiedad_id: tenant.propiedadId,
       arrendatario_nombre: tenant.nombre,
