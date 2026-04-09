@@ -116,3 +116,28 @@ UF_CACHE_HOURS=24
 - No permitir que un arrendatario vea datos de otro arrendatario
 - No generar dos códigos activos para la misma propiedad al mismo tiempo
 - No hardcodear el valor de la UF
+
+## Regla de colaboración
+Antes de empezar cualquier tarea siempre ejecutar:
+`git pull origin main`
+
+Después de terminar cada tarea siempre ejecutar:
+`git add . && git commit -m "descripción breve de lo que se hizo" && git push origin main`
+
+## Stack adicional implementado
+- **WhatsApp**: Twilio Sandbox (bot de notificaciones de pago)
+- **Cron**: Vercel Cron Jobs — corre diario a las 9 AM Chile
+- **Tablas adicionales en Supabase**: `notificaciones_log`, columna `telefono` en `profiles`
+
+## Variables de entorno adicionales
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+CRON_SECRET=
+
+## Lógica del bot de WhatsApp
+- 2 días antes del vencimiento → recordatorio amable
+- 1 día antes → segundo aviso
+- El día del vencimiento → mensaje con cuenta y monto exacto en UF y CLP
+- Cada día de atraso → aviso de mora
+- Nunca enviar el mismo mensaje dos veces en el mismo período (tabla notificaciones_log)
