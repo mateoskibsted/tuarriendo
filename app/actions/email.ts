@@ -47,7 +47,8 @@ async function matchEmailsWithAI(
   }>,
   tenants: Array<{
     idx: number
-    contratoId: string
+    contratoId?: string
+    propiedadId?: string
     nombre: string
     rut: string
     propiedadNombre: string
