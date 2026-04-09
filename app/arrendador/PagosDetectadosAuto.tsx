@@ -91,7 +91,14 @@ export default function PagosDetectadosAuto() {
             </p>
           </div>
           <div className="divide-y divide-gray-100">
-            {pendientes.map(s => (
+            {pendientes.map(s => {
+              const fechaDate = s.fecha ? new Date(s.fecha) : null
+              const fechaTexto = fechaDate && !isNaN(fechaDate.getTime())
+                ? fechaDate.toLocaleString('es-CL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+                : null
+              const gmailLink = `https://mail.google.com/mail/u/0/#all/${s.emailId}`
+
+              return (
               <div key={s.emailId} className="px-4 py-3 flex items-center justify-between gap-4">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -106,14 +113,26 @@ export default function PagosDetectadosAuto() {
                         className="w-36 border border-gray-300 rounded px-2 py-1 text-sm font-semibold"
                       />
                     )}
-                    {s.banco && <span className="text-xs text-gray-500">{s.banco}</span>}
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${CONFIANZA_COLOR[s.confianza]}`}>
-                      {s.confianza === 'alta' ? 'RUT coincide' : 'Nombre similar'}
+                      {s.confianza === 'alta' ? 'Coincidencia exacta' : 'Coincidencia parcial'}
                     </span>
                   </div>
                   <p className="text-sm text-gray-600 mt-0.5">
                     {s.arrendatario_nombre} — {s.propiedad_nombre}
                   </p>
+                  <div className="flex items-center gap-3 mt-1">
+                    {fechaTexto && (
+                      <span className="text-xs text-gray-400">{fechaTexto}</span>
+                    )}
+                    <a
+                      href={gmailLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-blue-500 hover:underline"
+                    >
+                      Ver correo →
+                    </a>
+                  </div>
                 </div>
                 {confirmed.has(s.emailId) ? (
                   <span className="text-green-600 text-sm font-medium shrink-0">Registrado</span>
@@ -127,7 +146,7 @@ export default function PagosDetectadosAuto() {
                   </button>
                 )}
               </div>
-            ))}
+            )})}
           </div>
         </div>
       )}
