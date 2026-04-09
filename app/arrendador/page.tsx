@@ -149,15 +149,20 @@ export default async function ArrendadorDashboard() {
           {propiedades.map((p: Propiedad) => {
             const contrato = (contratos ?? []).find((c: Contrato) => c.propiedad_id === p.id)
             const tienePagoFormal = contrato && pagosEsteMesSet.has(contrato.id)
-            const tieneInformal = !contrato && !!(p as Propiedad & { arrendatario_informal_nombre?: string }).arrendatario_informal_nombre
+            const pp = p as Propiedad & { arrendatario_informal_nombre?: string; arrendatario_informal_fecha_fin?: string }
+            const tieneInformal = !contrato && !!pp.arrendatario_informal_nombre
             const tienePagoInformal = tieneInformal && propiedadesPagadasSet.has(p.id)
+            const contratoVencido = tieneInformal && pp.arrendatario_informal_fecha_fin
+              && new Date(pp.arrendatario_informal_fecha_fin) < new Date()
 
             return (
               <Link key={p.id} href={`/arrendador/propiedades/${p.id}`}>
-                <Card className="hover:border-blue-300 transition-colors cursor-pointer h-full">
+                <Card className={`hover:border-blue-300 transition-colors cursor-pointer h-full ${contratoVencido ? 'border-orange-200' : ''}`}>
                   <div className="flex justify-between items-start mb-3">
                     <h3 className="font-semibold text-gray-900">{p.nombre}</h3>
-                    {contrato && tienePagoFormal ? (
+                    {contratoVencido ? (
+                      <Badge variant="red">Necesita revisión</Badge>
+                    ) : contrato && tienePagoFormal ? (
                       <Badge variant="green">Pagado</Badge>
                     ) : contrato ? (
                       <Badge variant="yellow">Sin pago</Badge>

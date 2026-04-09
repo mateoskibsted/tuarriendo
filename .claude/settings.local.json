@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit -m ':*)",
+      "Bash(git commit -m 'debug: mostrar rawContent en endpoint de diagnóstico:*)",
+      "Bash(git commit -m 'debug: mostrar prompt y respuesta de Claude en diagnóstico:*)",
+      "Bash(git commit -m 'fix: requerir solo nombre + primer apellido para match de correos:*)",
+      "Bash(git commit -m 'feat: mostrar hora y link al correo en pagos detectados:*)"
+    ]
+  }
+}

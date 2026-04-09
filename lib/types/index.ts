@@ -12,6 +12,7 @@ export interface Profile {
 }
 
 export type Moneda = 'UF' | 'CLP'
+export type CobroTipo = 'adelantado' | 'atrasado'
 
 export interface Propiedad {
   id: string
@@ -29,6 +30,9 @@ export interface Propiedad {
   arrendatario_informal_rut?: string | null
   arrendatario_informal_email?: string | null
   arrendatario_informal_celular?: string | null
+  arrendatario_informal_cobro_tipo?: CobroTipo | null
+  arrendatario_informal_fecha_inicio?: string | null
+  arrendatario_informal_fecha_fin?: string | null
   created_at: string
 }
 
@@ -50,6 +54,7 @@ export interface Contrato {
   fecha_fin?: string
   valor_uf: number
   dia_pago: number
+  cobro_tipo?: CobroTipo
   activo: boolean
   created_at: string
   propiedades?: Propiedad

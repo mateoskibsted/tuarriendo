@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { guardarArrendatarioInformal, limpiarArrendatarioInformal } from '@/app/actions/arrendador'
-import type { Moneda, Propiedad } from '@/lib/types'
+import type { Moneda, CobroTipo, Propiedad } from '@/lib/types'
 import { formatUF, formatCLP } from '@/lib/utils/uf'
 import { formatRut, cleanRut } from '@/lib/utils/rut'
 
@@ -31,7 +31,8 @@ function normalizePhone(raw: string): string {
 type Props = Pick<Propiedad,
   'id' | 'valor_uf' | 'moneda' | 'dia_vencimiento' | 'multa_monto' | 'multa_moneda' |
   'arrendatario_informal_nombre' | 'arrendatario_informal_rut' |
-  'arrendatario_informal_email' | 'arrendatario_informal_celular'
+  'arrendatario_informal_email' | 'arrendatario_informal_celular' |
+  'arrendatario_informal_cobro_tipo' | 'arrendatario_informal_fecha_inicio' | 'arrendatario_informal_fecha_fin'
 >
 
 function InfoFila({ label, value }: { label: string; value?: string | null }) {
@@ -52,6 +53,7 @@ export default function MarcarArrendadaSection(props: Props) {
   const [tieneMulta, setTieneMulta] = useState(!!props.multa_monto)
   const [rutInput, setRutInput] = useState(props.arrendatario_informal_rut ? formatRut(props.arrendatario_informal_rut) : '')
   const [phoneInput, setPhoneInput] = useState(props.arrendatario_informal_celular ?? '')
+  const [cobroTipo, setCobroTipo] = useState<CobroTipo>(props.arrendatario_informal_cobro_tipo ?? 'adelantado')
   const [error, setError] = useState('')
   const [isPending, startTransition] = useTransition()
 
@@ -94,6 +96,20 @@ export default function MarcarArrendadaSection(props: Props) {
           <InfoFila label="WhatsApp" value={props.arrendatario_informal_celular ? formatPhone(props.arrendatario_informal_celular) : undefined} />
           <InfoFila label="Valor mensual" value={valorTexto} />
           <InfoFila label="Día de vencimiento" value={`Día ${props.dia_vencimiento} de cada mes`} />
+          <InfoFila label="Tipo de cobro" value={props.arrendatario_informal_cobro_tipo === 'atrasado' ? 'Mes atrasado (cobra el mes siguiente)' : 'Mes adelantado (cobra al inicio del mes)'} />
+          {props.arrendatario_informal_fecha_inicio && (
+            <InfoFila label="Inicio contrato" value={new Date(props.arrendatario_informal_fecha_inicio + 'T12:00:00').toLocaleDateString('es-CL')} />
+          )}
+          {props.arrendatario_informal_fecha_fin && (
+            <InfoFila label="Fin contrato" value={new Date(props.arrendatario_informal_fecha_fin + 'T12:00:00').toLocaleDateString('es-CL')} />
+          )}
+          {props.arrendatario_informal_fecha_fin && (() => {
+            const fin = new Date(props.arrendatario_informal_fecha_fin + 'T12:00:00')
+            const hoy = new Date()
+            if (fin < hoy) return <InfoFila label="Estado contrato" value="⚠️ Contrato vencido — necesita revisión" />
+            const meses = (fin.getFullYear() - hoy.getFullYear()) * 12 + (fin.getMonth() - hoy.getMonth())
+            return <InfoFila label="Cobros restantes" value={`${meses + 1} meses`} />
+          })()}
           {multaTexto && <InfoFila label="Multa diaria por atraso" value={multaTexto} />}
         </div>
         <div className="flex gap-3 pt-2 border-t border-gray-100">
@@ -101,6 +117,7 @@ export default function MarcarArrendadaSection(props: Props) {
             onClick={() => {
               setRutInput(props.arrendatario_informal_rut ? formatRut(props.arrendatario_informal_rut) : '')
               setPhoneInput(props.arrendatario_informal_celular ?? '')
+              setCobroTipo(props.arrendatario_informal_cobro_tipo ?? 'adelantado')
               setEditando(true)
             }}
             className="text-sm text-blue-600 hover:underline"
@@ -231,6 +248,57 @@ export default function MarcarArrendadaSection(props: Props) {
               className="w-32 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <p className="text-xs text-gray-400 mt-1">Entre el 1 y el 28 de cada mes</p>
+          </div>
+
+          {/* Tipo de cobro */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de cobro</label>
+            <div className="flex rounded-lg border border-gray-200 p-1 w-fit">
+              {([
+                { value: 'adelantado', label: 'Adelantado' },
+                { value: 'atrasado', label: 'Mes siguiente' },
+              ] as { value: CobroTipo; label: string }[]).map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setCobroTipo(opt.value)}
+                  className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${cobroTipo === opt.value ? 'bg-blue-600 text-white' : 'text-gray-600 hover:text-gray-900'}`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              {cobroTipo === 'adelantado'
+                ? 'El arriendo se cobra al inicio del mes de uso (ej: abril se paga el 1 de abril)'
+                : 'El arriendo se cobra al inicio del mes siguiente (ej: abril se paga el 1 de mayo)'}
+            </p>
+            <input type="hidden" name="cobro_tipo" value={cobroTipo} />
+          </div>
+
+          {/* Duración del contrato */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Duración del contrato</label>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Fecha inicio</label>
+                <input
+                  name="fecha_inicio"
+                  type="date"
+                  defaultValue={props.arrendatario_informal_fecha_inicio ?? ''}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Fecha fin</label>
+                <input
+                  name="fecha_fin"
+                  type="date"
+                  defaultValue={props.arrendatario_informal_fecha_fin ?? ''}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
           </div>
 
           {/* Multa */}

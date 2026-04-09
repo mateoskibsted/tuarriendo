@@ -137,6 +137,9 @@ export default async function PropiedadPage({ params }: { params: Promise<{ id: 
                 arrendatario_informal_rut={propiedad.arrendatario_informal_rut}
                 arrendatario_informal_email={propiedad.arrendatario_informal_email}
                 arrendatario_informal_celular={propiedad.arrendatario_informal_celular}
+                arrendatario_informal_cobro_tipo={propiedad.arrendatario_informal_cobro_tipo}
+                arrendatario_informal_fecha_inicio={propiedad.arrendatario_informal_fecha_inicio}
+                arrendatario_informal_fecha_fin={propiedad.arrendatario_informal_fecha_fin}
               />
               <div className="border-t border-gray-100 pt-4">
                 <p className="text-sm text-gray-600 mb-3">

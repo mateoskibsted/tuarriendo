@@ -212,6 +212,8 @@ export async function guardarArrendatarioInformal(propiedadId: string, formData:
 
   const rutRaw = (formData.get('rut') as string)?.trim()
   const celularRaw = (formData.get('celular') as string)?.trim()
+  const fechaInicio = (formData.get('fecha_inicio') as string)?.trim()
+  const fechaFin = (formData.get('fecha_fin') as string)?.trim()
 
   const { error } = await admin
     .from('propiedades')
@@ -220,6 +222,9 @@ export async function guardarArrendatarioInformal(propiedadId: string, formData:
       arrendatario_informal_rut: rutRaw ? cleanRut(rutRaw) : null,
       arrendatario_informal_email: (formData.get('email') as string)?.trim() || null,
       arrendatario_informal_celular: normalizePhone(celularRaw),
+      arrendatario_informal_cobro_tipo: formData.get('cobro_tipo') as string || 'adelantado',
+      arrendatario_informal_fecha_inicio: fechaInicio || null,
+      arrendatario_informal_fecha_fin: fechaFin || null,
       valor_uf: parseFloat(formData.get('valor_uf') as string),
       moneda: formData.get('moneda') as string,
       dia_vencimiento: parseInt(formData.get('dia_vencimiento') as string) || 5,
