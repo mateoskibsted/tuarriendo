@@ -15,7 +15,6 @@ function twiml(message: string): NextResponse {
 }
 
 export async function POST(req: NextRequest) {
-  // Read body as form data
   const formData = await req.formData().catch(() => null)
   const text = formData
     ? Object.fromEntries(formData.entries()) as Record<string, string>
@@ -24,6 +23,9 @@ export async function POST(req: NextRequest) {
   const fromRaw = (text['From'] ?? '').replace('whatsapp:', '').replace(/\s/g, '')
   const msgRaw = (text['Body'] ?? '').trim()
   const msgUp = msgRaw.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
+  // DEBUG: respond immediately so we know webhook is being called
+  return twiml(`DEBUG: From=${fromRaw} Body=${msgRaw}`)
 
   if (!fromRaw) return twiml('Numero no identificado.')
 
