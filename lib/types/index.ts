@@ -71,6 +71,7 @@ export interface Pago {
   estado: EstadoPago
   fecha_pago?: string
   notas?: string
+  email_origen?: string | null
   created_at: string
 }
 

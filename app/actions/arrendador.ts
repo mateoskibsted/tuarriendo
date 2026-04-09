@@ -61,19 +61,27 @@ export async function actualizarPropiedad(id: string, formData: FormData) {
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }
 
+  const valorUfRaw = formData.get('valor_uf') as string
   const multaMonto = formData.get('multa_monto') as string
+
+  const campos: Record<string, unknown> = {
+    nombre: formData.get('nombre') as string,
+    direccion: formData.get('direccion') as string,
+    descripcion: formData.get('descripcion') as string,
+  }
+
+  // Only update financial fields if they're present in the form (not soloBasico mode)
+  if (valorUfRaw) {
+    campos.valor_uf = parseFloat(valorUfRaw)
+    campos.moneda = formData.get('moneda') as string
+    campos.dia_vencimiento = parseInt(formData.get('dia_vencimiento') as string) || 5
+    campos.multa_monto = multaMonto ? parseFloat(multaMonto) : null
+    campos.multa_moneda = formData.get('multa_moneda') as string
+  }
+
   const { error } = await admin
     .from('propiedades')
-    .update({
-      nombre: formData.get('nombre') as string,
-      direccion: formData.get('direccion') as string,
-      descripcion: formData.get('descripcion') as string,
-      valor_uf: parseFloat(formData.get('valor_uf') as string),
-      moneda: formData.get('moneda') as string,
-      dia_vencimiento: parseInt(formData.get('dia_vencimiento') as string) || 5,
-      multa_monto: multaMonto ? parseFloat(multaMonto) : null,
-      multa_moneda: formData.get('multa_moneda') as string,
-    })
+    .update(campos)
     .eq('id', id)
     .eq('arrendador_id', user.id)
 

@@ -166,7 +166,14 @@ export default function PagosSection({
                   <span className="font-mono text-sm text-gray-700 w-20 shrink-0">{pago.periodo}</span>
                   <span className="text-sm font-medium w-16 text-right shrink-0">{formatUF(pago.valor_uf)}</span>
                   <span className="text-sm text-gray-500 w-28 text-right shrink-0">{pago.valor_clp ? formatCLP(pago.valor_clp) : '—'}</span>
-                  <span className="flex-1"><Badge variant={badge.variant}>{badge.label}</Badge></span>
+                  <span className="flex-1 flex items-center gap-2">
+                    <Badge variant={badge.variant}>{badge.label}</Badge>
+                    {pago.email_origen && (
+                      <a href={pago.email_origen} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline">
+                        Ver correo →
+                      </a>
+                    )}
+                  </span>
                   <span className="text-sm text-gray-400 shrink-0">{pago.fecha_pago ? new Date(pago.fecha_pago).toLocaleDateString('es-CL') : '—'}</span>
                   <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                     <button onClick={() => setEditingId(pago.id)} className="text-xs text-blue-500 hover:underline">Editar</button>

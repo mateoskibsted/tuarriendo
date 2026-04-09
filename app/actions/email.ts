@@ -351,6 +351,7 @@ export async function confirmarPagoEmail(
   contratoId: string,
   montoCLP: number,
   periodo: string,
+  emailId?: string,
 ) {
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }
@@ -381,6 +382,7 @@ export async function confirmarPagoEmail(
     estado: 'pagado',
     fecha_pago: new Date().toISOString(),
     notas: 'Registrado automáticamente desde correo',
+    email_origen: emailId ? `https://mail.google.com/mail/u/0/#all/${emailId}` : null,
   }
 
   if (existing) {
@@ -398,6 +400,7 @@ export async function confirmarPagoEmailInformal(
   propiedadId: string,
   montoCLP: number,
   periodo: string,
+  emailId?: string,
 ) {
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }
@@ -428,6 +431,7 @@ export async function confirmarPagoEmailInformal(
     estado: 'pagado',
     fecha_pago: new Date().toISOString(),
     notas: 'Registrado automáticamente desde correo',
+    email_origen: emailId ? `https://mail.google.com/mail/u/0/#all/${emailId}` : null,
   }
 
   if (existing) {
