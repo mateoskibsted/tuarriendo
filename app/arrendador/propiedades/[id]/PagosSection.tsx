@@ -9,10 +9,11 @@ import Input from '@/components/ui/Input'
 import { formatUF, formatCLP } from '@/lib/utils/uf'
 import type { Pago, EstadoPago } from '@/lib/types'
 
-const estadoBadge: Record<EstadoPago, { label: string; variant: 'green' | 'red' | 'yellow' }> = {
+const estadoBadge: Record<EstadoPago, { label: string; variant: 'green' | 'red' | 'yellow' | 'blue' | 'gray' | 'orange' }> = {
   pagado: { label: 'Pagado', variant: 'green' },
   pendiente: { label: 'Pendiente', variant: 'yellow' },
-  atrasado: { label: 'Atrasado', variant: 'red' },
+  atrasado: { label: 'Pagado (tarde)', variant: 'green' },
+  incompleto: { label: 'Incompleto', variant: 'orange' },
 }
 
 function formatFechaPago(fechaStr: string | null | undefined): string {

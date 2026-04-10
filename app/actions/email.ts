@@ -105,9 +105,22 @@ function matchEmails(
     propiedadId?: string
     nombre: string
     monto_clp: number
+    monto_total_esperado: number  // base + multa acumulada
   }>
-): Array<{ emailIdx: number; tenantIdx: number; confianza: 'alta' | 'media'; monto_clp: number }> {
-  const results: Array<{ emailIdx: number; tenantIdx: number; confianza: 'alta' | 'media'; monto_clp: number }> = []
+): Array<{
+  emailIdx: number
+  tenantIdx: number
+  confianza: 'alta' | 'media'
+  monto_clp: number
+  monto_faltante: number
+}> {
+  const results: Array<{
+    emailIdx: number
+    tenantIdx: number
+    confianza: 'alta' | 'media'
+    monto_clp: number
+    monto_faltante: number
+  }> = []
 
   for (const email of emails) {
     const amounts = extractAmounts(email.rawContent)
@@ -116,20 +129,23 @@ function matchEmails(
       const nameMatch = nameMatchesContent(tenant.nombre, email.rawContent)
       if (!nameMatch) continue
 
-      // Find an amount that matches within ±15%
-      const expected = tenant.monto_clp
+      const base = tenant.monto_clp
+      const total = tenant.monto_total_esperado
+
+      // Accept any amount within ±15% of the base amount
       const matchedAmount = amounts.find(a => {
-        if (expected === 0) return false
-        return Math.abs(a - expected) / expected <= 0.15
+        if (base === 0) return false
+        return Math.abs(a - base) / base <= 0.15 || Math.abs(a - total) / total <= 0.15
       })
 
       if (matchedAmount === undefined) continue
 
-      const confianza: 'alta' | 'media' = Math.abs(matchedAmount - expected) / expected <= 0.05
-        ? 'alta'
-        : 'media'
+      // Exact = covers the full debt (base + fine) within ±5%
+      const coversTotal = total > 0 && Math.abs(matchedAmount - total) / total <= 0.05
+      const confianza: 'alta' | 'media' = coversTotal ? 'alta' : 'media'
+      const monto_faltante = Math.max(0, total - matchedAmount)
 
-      results.push({ emailIdx: email.idx, tenantIdx: tenant.idx, confianza, monto_clp: matchedAmount })
+      results.push({ emailIdx: email.idx, tenantIdx: tenant.idx, confianza, monto_clp: matchedAmount, monto_faltante })
     }
   }
 
@@ -192,19 +208,19 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
   // Load active formal contracts with tenant info
   const { data: contratos } = await admin
     .from('contratos')
-    .select('id, propiedad_id, propiedades(nombre, valor_uf, moneda), profiles!contratos_arrendatario_id_fkey(nombre, rut)')
+    .select('id, propiedad_id, dia_pago, propiedades(nombre, valor_uf, moneda, multa_monto, multa_moneda), profiles!contratos_arrendatario_id_fkey(nombre, rut)')
     .in('propiedad_id', propiedadIds)
     .eq('activo', true)
 
   // Load propiedades with informal arrendatarios
   const { data: propiedadesInformales } = await admin
     .from('propiedades')
-    .select('id, nombre, valor_uf, moneda, arrendatario_informal_nombre, arrendatario_informal_rut')
+    .select('id, nombre, valor_uf, moneda, dia_vencimiento, multa_monto, multa_moneda, arrendatario_informal_nombre, arrendatario_informal_rut')
     .in('id', propiedadIds)
     .eq('activa', true)
     .not('arrendatario_informal_nombre', 'is', null)
 
-  // Build tenant list for AI (formal + informal)
+  // Build tenant list (formal + informal)
   const tenants: Array<{
     idx: number
     contratoId?: string
@@ -214,12 +230,14 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
     propiedadNombre: string
     monto: number
     moneda: string
+    diaPago?: number | null
+    multaMonto?: number | null
   }> = []
 
   let idx = 1
   for (const c of contratos ?? []) {
     const profile = (c as unknown as { profiles?: { nombre: string; rut: string } }).profiles
-    const propiedad = (c as unknown as { propiedades?: { nombre: string; valor_uf: number; moneda: string } }).propiedades
+    const propiedad = (c as unknown as { propiedades?: { nombre: string; valor_uf: number; moneda: string; multa_monto?: number | null } }).propiedades
     if (!profile?.nombre) continue
     tenants.push({
       idx: idx++,
@@ -229,6 +247,8 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
       propiedadNombre: propiedad?.nombre ?? '',
       monto: propiedad?.valor_uf ?? 0,
       moneda: propiedad?.moneda ?? 'UF',
+      diaPago: (c as unknown as { dia_pago?: number | null }).dia_pago,
+      multaMonto: propiedad?.multa_monto,
     })
   }
 
@@ -242,6 +262,8 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
       propiedadNombre: p.nombre,
       monto: p.valor_uf ?? 0,
       moneda: p.moneda ?? 'UF',
+      diaPago: p.dia_vencimiento,
+      multaMonto: p.multa_monto,
     })
   }
 
@@ -253,7 +275,7 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
     .from('pagos')
     .select('contrato_id, propiedad_id')
     .eq('periodo', periodoActual)
-    .eq('estado', 'pagado')
+    .in('estado', ['pagado', 'atrasado', 'incompleto'])
 
   const contratosPagados = new Set((pagosYaRegistrados ?? []).map((p: { contrato_id: string | null }) => p.contrato_id).filter(Boolean))
   const propiedadesPagadas = new Set((pagosYaRegistrados ?? []).map((p: { propiedad_id: string | null }) => p.propiedad_id).filter(Boolean))
@@ -268,12 +290,22 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
   // Get current UF value for CLP conversion
   const ufValue = await getUFValue()
 
-  // Convert all tenant amounts to CLP
-  const tenantsConCLP = tenantsSinPagar.map(t => ({
-    ...t,
-    monto_clp: t.moneda === 'UF' ? Math.round(t.monto * ufValue) : t.monto,
-    monto_original: t.monto,
-  }))
+  // Calculate total expected (base + fine if overdue) for each tenant
+  const [year, month] = periodoActual.split('-').map(Number)
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
+
+  const tenantsConCLP = tenantsSinPagar.map(t => {
+    const monto_clp = t.moneda === 'UF' ? Math.round(t.monto * ufValue) : t.monto
+    let multa = 0
+    if (t.diaPago && t.multaMonto) {
+      const venc = new Date(year, month - 1, t.diaPago)
+      if (hoy > venc) {
+        const dias = Math.floor((hoy.getTime() - venc.getTime()) / 86400000)
+        multa = dias * t.multaMonto
+      }
+    }
+    return { ...t, monto_clp, monto_total_esperado: monto_clp + multa }
+  })
 
   // Connect to Gmail
   const oauth2Client = buildOAuthClient(connection)
@@ -364,6 +396,8 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
       fecha: email.fecha,
       asunto: email.asunto,
       monto_clp: match.monto_clp,
+      monto_total_esperado: tenant.monto_total_esperado,
+      monto_faltante: match.monto_faltante > 0 ? match.monto_faltante : undefined,
       contrato_id: tenant.contratoId,
       propiedad_id: tenant.propiedadId,
       arrendatario_nombre: tenant.nombre,
@@ -435,8 +469,18 @@ export async function confirmarPagoEmail(
   }
   const notas = notasParts.join('. ')
 
-  // Estado: always 'pagado' if transfer was received; 'atrasado' only if there's no payment at all
-  const estado = diasAtraso > 0 ? 'atrasado' : 'pagado'
+  // Estado:
+  // - 'pagado': a tiempo y monto completo
+  // - 'atrasado': tarde pero monto cubre base+multa (verde en UI)
+  // - 'incompleto': monto recibido no cubre la deuda total
+  const montoTotalEsperado = montoBaseCLP + multaTotal
+  const esPagoCompleto = montoCLP >= montoTotalEsperado - 100  // tolerancia $100
+  let estado: string
+  if (diasAtraso > 0) {
+    estado = esPagoCompleto ? 'atrasado' : 'incompleto'
+  } else {
+    estado = esPagoCompleto ? 'pagado' : 'incompleto'
+  }
 
   const { data: existing } = await admin
     .from('pagos')
@@ -533,7 +577,14 @@ export async function confirmarPagoEmailInformal(
   }
   const notas = notasParts.join('. ')
 
-  const estado = diasAtraso > 0 ? 'atrasado' : 'pagado'
+  const montoTotalEsperado = montoBaseCLP + multaTotal
+  const esPagoCompleto = montoCLP >= montoTotalEsperado - 100
+  let estado: string
+  if (diasAtraso > 0) {
+    estado = esPagoCompleto ? 'atrasado' : 'incompleto'
+  } else {
+    estado = esPagoCompleto ? 'pagado' : 'incompleto'
+  }
 
   const { data: existing } = await admin
     .from('pagos')

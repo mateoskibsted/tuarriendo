@@ -1,5 +1,5 @@
 export type Role = 'arrendador' | 'arrendatario'
-export type EstadoPago = 'pendiente' | 'pagado' | 'atrasado'
+export type EstadoPago = 'pendiente' | 'pagado' | 'atrasado' | 'incompleto'
 
 export interface Profile {
   id: string
@@ -90,6 +90,8 @@ export interface PagoSugerido {
   fecha: string
   asunto: string
   monto_clp?: number
+  monto_total_esperado?: number  // base + multa acumulada
+  monto_faltante?: number        // diferencia entre esperado y recibido
   rut_detectado?: string
   nombre_detectado?: string
   banco?: string

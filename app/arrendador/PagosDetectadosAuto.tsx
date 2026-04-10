@@ -9,10 +9,10 @@ function formatCLPLocal(n: number) {
   return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(n)
 }
 
-const CONFIANZA_COLOR: Record<PagoSugerido['confianza'], string> = {
-  alta: 'bg-green-100 text-green-800',
-  media: 'bg-yellow-100 text-yellow-800',
-  baja: 'bg-gray-100 text-gray-500',
+const CONFIANZA_LABEL: Record<PagoSugerido['confianza'], string> = {
+  alta: 'Coincidencia exacta',
+  media: 'Coincidencia parcial',
+  baja: 'Sin coincidencia',
 }
 
 export default function PagosDetectadosAuto() {
@@ -112,9 +112,24 @@ export default function PagosDetectadosAuto() {
                         className="w-36 border border-gray-300 rounded px-2 py-1 text-sm font-semibold"
                       />
                     )}
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${CONFIANZA_COLOR[s.confianza]}`}>
-                      {s.confianza === 'alta' ? 'Coincidencia exacta' : 'Coincidencia parcial'}
-                    </span>
+                    {/* Badge de estado del pago */}
+                    {s.monto_faltante && s.monto_faltante > 0 ? (
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-yellow-100 text-yellow-800">
+                        Pago incompleto
+                      </span>
+                    ) : (
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        s.confianza === 'alta' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                      }`}>
+                        {CONFIANZA_LABEL[s.confianza]}
+                      </span>
+                    )}
+                    {/* Faltante en rojo */}
+                    {s.monto_faltante && s.monto_faltante > 0 && (
+                      <span className="text-xs font-semibold text-red-600">
+                        Falta {formatCLPLocal(s.monto_faltante)}
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm text-gray-600 mt-0.5">
                     {s.arrendatario_nombre} — {s.propiedad_nombre}
