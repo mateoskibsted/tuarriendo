@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import Link from 'next/link'
 import Badge from '@/components/ui/Badge'
-import { formatUF, formatCLP } from '@/lib/utils/uf'
+import { formatUF, formatCLP, getUFValue } from '@/lib/utils/uf'
 import { todayInChile } from '@/lib/utils/date'
 import PagosDetectadosAuto from './PagosDetectadosAuto'
 import PagosDetectadosCron from './PagosDetectadosCron'
@@ -96,6 +96,8 @@ export default async function ArrendadorDashboard() {
     .select('id')
     .eq('arrendador_id', user!.id)
     .single()
+
+  const ufHoy = await getUFValue()
 
   const totalPropiedades = propiedades?.length ?? 0
   const puedeAgregarMas = totalPropiedades < MAX_PROPIEDADES
@@ -257,9 +259,20 @@ export default async function ArrendadorDashboard() {
                       )}
                     </div>
                     <p className="text-sm text-gray-500 mb-3">{p.direccion}</p>
-                    <p className="text-xl font-bold text-blue-800">
-                      {p.moneda === 'CLP' ? formatCLP(p.valor_uf) : `${formatUF(p.valor_uf)} UF`}/mes
-                    </p>
+                    {p.moneda === 'CLP' ? (
+                      <p className="text-xl font-bold text-blue-800">
+                        {formatCLP(p.valor_uf)} CLP/mes
+                      </p>
+                    ) : (
+                      <div>
+                        <p className="text-xl font-bold text-blue-800">
+                          {formatUF(p.valor_uf)} UF/mes
+                        </p>
+                        <p className="text-sm font-medium text-blue-500">
+                          ≈ {formatCLP(Math.round(p.valor_uf * ufHoy))} CLP/mes
+                        </p>
+                      </div>
+                    )}
                     {sinPagoAtrasado && (
                       <p className="text-sm text-red-500 mt-1">{dias} día{dias !== 1 ? 's' : ''} de atraso</p>
                     )}
