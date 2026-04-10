@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { google } from 'googleapis'
-import { getUFValue } from '@/lib/utils/uf'
+import { getUFValue, getUFValueForDate } from '@/lib/utils/uf'
 import { todayInChile } from '@/lib/utils/date'
 import { extractTextFromPayload, decodeBase64Url } from '@/lib/utils/email-parser'
 
@@ -210,15 +210,16 @@ export async function GET(req: NextRequest) {
             const notas = `Auto-confirmado por escáner. Monto recibido: $${matched.toLocaleString('es-CL')} CLP`
             const emailOrigen = `https://mail.google.com/mail/u/0/#all/${msg.id}`
             const fechaPago = new Date(emailFecha).toISOString()
+            const ufValorDia = tenant.moneda !== 'CLP' ? await getUFValueForDate(fechaPago) : null
 
             if (tenant.tipo === 'contrato') {
               const { data: existing } = await admin.from('pagos').select('id').eq('contrato_id', tenant.id).eq('periodo', periodoActual).maybeSingle()
-              const payload = { contrato_id: tenant.id, propiedad_id: null, periodo: periodoActual, valor_uf: tenant.moneda !== 'CLP' ? tenant.valorUf : 0, valor_clp: matched, estado, fecha_pago: fechaPago, notas, email_origen: emailOrigen }
+              const payload = { contrato_id: tenant.id, propiedad_id: null, periodo: periodoActual, valor_uf: tenant.moneda !== 'CLP' ? tenant.valorUf : 0, valor_clp: matched, uf_valor_dia: ufValorDia, estado, fecha_pago: fechaPago, notas, email_origen: emailOrigen }
               if (existing) await admin.from('pagos').update(payload).eq('id', existing.id)
               else await admin.from('pagos').insert(payload)
             } else {
               const { data: existing } = await admin.from('pagos').select('id').eq('propiedad_id', tenant.id).eq('periodo', periodoActual).maybeSingle()
-              const payload = { propiedad_id: tenant.id, contrato_id: null, periodo: periodoActual, valor_uf: tenant.moneda !== 'CLP' ? tenant.valorUf : 0, valor_clp: matched, estado, fecha_pago: fechaPago, notas, email_origen: emailOrigen }
+              const payload = { propiedad_id: tenant.id, contrato_id: null, periodo: periodoActual, valor_uf: tenant.moneda !== 'CLP' ? tenant.valorUf : 0, valor_clp: matched, uf_valor_dia: ufValorDia, estado, fecha_pago: fechaPago, notas, email_origen: emailOrigen }
               if (existing) await admin.from('pagos').update(payload).eq('id', existing.id)
               else await admin.from('pagos').insert(payload)
             }

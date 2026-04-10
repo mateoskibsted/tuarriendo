@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { cleanRut } from '@/lib/utils/rut'
 import { enviarWhatsApp } from '@/lib/utils/twilio'
 import { todayInChile } from '@/lib/utils/date'
+import { getUFValueForDate } from '@/lib/utils/uf'
 
 function normalizePhone(raw: string): string | null {
   if (!raw?.trim()) return null
@@ -154,9 +155,16 @@ export async function registrarPago(contratoId: string, formData: FormData) {
 
   const periodo = formData.get('periodo') as string
   const valorUf = parseFloat(formData.get('valor_uf') as string)
-  const valorClp = formData.get('valor_clp') ? parseInt(formData.get('valor_clp') as string) : null
+  const valorClpRaw = formData.get('valor_clp') ? parseInt(formData.get('valor_clp') as string) : null
   const estado = formData.get('estado') as string
   const notas = formData.get('notas') as string
+
+  // Fetch UF value for today (payment date for manual registration)
+  const fechaPago = estado === 'pagado' ? new Date().toISOString() : null
+  const ufValorDia = fechaPago ? await getUFValueForDate(fechaPago) : null
+
+  // If no CLP provided and arriendo is in UF, calculate from today's UF
+  const valorClp = valorClpRaw ?? (ufValorDia && valorUf ? Math.round(valorUf * ufValorDia) : null)
 
   const { data: existing } = await admin
     .from('pagos')
@@ -165,30 +173,20 @@ export async function registrarPago(contratoId: string, formData: FormData) {
     .eq('periodo', periodo)
     .single()
 
-  if (existing) {
-    const { error } = await admin
-      .from('pagos')
-      .update({
-        valor_uf: valorUf,
-        valor_clp: valorClp,
-        estado,
-        notas,
-        fecha_pago: estado === 'pagado' ? new Date().toISOString() : null,
-      })
-      .eq('id', existing.id)
+  const payload = {
+    valor_uf: valorUf,
+    valor_clp: valorClp,
+    uf_valor_dia: ufValorDia,
+    estado,
+    notas,
+    fecha_pago: fechaPago,
+  }
 
+  if (existing) {
+    const { error } = await admin.from('pagos').update(payload).eq('id', existing.id)
     if (error) return { error: error.message }
   } else {
-    const { error } = await admin.from('pagos').insert({
-      contrato_id: contratoId,
-      periodo,
-      valor_uf: valorUf,
-      valor_clp: valorClp,
-      estado,
-      notas,
-      fecha_pago: estado === 'pagado' ? new Date().toISOString() : null,
-    })
-
+    const { error } = await admin.from('pagos').insert({ contrato_id: contratoId, periodo, ...payload })
     if (error) return { error: error.message }
   }
 
@@ -440,26 +438,27 @@ export async function registrarPagoInformal(propiedadId: string, formData: FormD
     .eq('periodo', periodo)
     .maybeSingle()
 
+  // Fetch UF value for today (payment date for manual registration)
+  const fechaPago = ['pagado', 'atrasado'].includes(estado) ? new Date().toISOString() : null
+  const ufValorDia = fechaPago ? await getUFValueForDate(fechaPago) : null
+
+  // If no CLP provided and arriendo is in UF, calculate from today's UF
+  const valorClpFinal = valorClp ?? (ufValorDia && valorUf ? Math.round(valorUf * ufValorDia) : null)
+
+  const payload = {
+    valor_uf: valorUf,
+    valor_clp: valorClpFinal,
+    uf_valor_dia: ufValorDia,
+    estado,
+    notas,
+    fecha_pago: fechaPago,
+  }
+
   if (existing) {
-    const { error } = await admin.from('pagos').update({
-      valor_uf: valorUf,
-      valor_clp: valorClp,
-      estado,
-      notas,
-      fecha_pago: estado === 'pagado' ? new Date().toISOString() : null,
-    }).eq('id', existing.id)
+    const { error } = await admin.from('pagos').update(payload).eq('id', existing.id)
     if (error) return { error: error.message }
   } else {
-    const { error } = await admin.from('pagos').insert({
-      propiedad_id: propiedadId,
-      contrato_id: null,
-      periodo,
-      valor_uf: valorUf,
-      valor_clp: valorClp,
-      estado,
-      notas,
-      fecha_pago: estado === 'pagado' ? new Date().toISOString() : null,
-    })
+    const { error } = await admin.from('pagos').insert({ propiedad_id: propiedadId, contrato_id: null, periodo, ...payload })
     if (error) return { error: error.message }
   }
 

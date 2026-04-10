@@ -70,6 +70,7 @@ export interface Pago {
   periodo: string
   valor_uf: number
   valor_clp?: number
+  uf_valor_dia?: number | null  // UF value on the exact payment date
   estado: EstadoPago
   fecha_pago?: string
   notas?: string

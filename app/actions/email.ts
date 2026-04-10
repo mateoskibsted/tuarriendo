@@ -5,7 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { google } from 'googleapis'
 import { revalidatePath } from 'next/cache'
 import { extractTextFromPayload, decodeBase64Url } from '@/lib/utils/email-parser'
-import { getUFValue } from '@/lib/utils/uf'
+import { getUFValue, getUFValueForDate } from '@/lib/utils/uf'
 import { todayInChile } from '@/lib/utils/date'
 import type { PagoSugerido } from '@/lib/types'
 
@@ -543,11 +543,15 @@ export async function confirmarPagoEmail(
 
   const fechaPago = emailFecha ? new Date(emailFecha).toISOString() : new Date().toISOString()
 
+  // UF value on the exact payment date for historical accuracy
+  const ufValorDia = moneda !== 'CLP' ? await getUFValueForDate(fechaPago) : null
+
   const payload = {
     contrato_id: contratoId,
     periodo,
     valor_uf: moneda !== 'CLP' ? valorBase : 0,
     valor_clp: montoCLP,
+    uf_valor_dia: ufValorDia,
     estado,
     fecha_pago: fechaPago,
     notas,
@@ -647,12 +651,15 @@ export async function confirmarPagoEmailInformal(
 
   const fechaPago = emailFecha ? new Date(emailFecha).toISOString() : new Date().toISOString()
 
+  const ufValorDia = moneda !== 'CLP' ? await getUFValueForDate(fechaPago) : null
+
   const payload = {
     propiedad_id: propiedadId,
     contrato_id: null,
     periodo,
     valor_uf: moneda !== 'CLP' ? valorBase : 0,
     valor_clp: montoCLP,
+    uf_valor_dia: ufValorDia,
     estado,
     fecha_pago: fechaPago,
     notas,

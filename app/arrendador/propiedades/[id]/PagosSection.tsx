@@ -289,7 +289,12 @@ export default function PagosSection({
                         className={`border-b border-gray-50 group ${tieneAtraso ? 'bg-orange-50' : 'hover:bg-gray-50'}`}
                       >
                         <td className="py-2 px-2 font-mono text-gray-700">{pago.periodo}</td>
-                        <td className="py-2 px-2 text-right font-medium text-gray-800">{montoBase(pago)}</td>
+                        <td className="py-2 px-2 text-right">
+                          <span className="font-medium text-gray-800">{montoBase(pago)}</span>
+                          {!esCLP && pago.uf_valor_dia && (
+                            <div className="text-xs text-gray-400">1 UF = {formatCLP(pago.uf_valor_dia)}</div>
+                          )}
+                        </td>
                         <td className="py-2 px-2 text-right text-sm text-gray-700">
                           {pago.valor_clp ? formatCLP(pago.valor_clp) : '—'}
                         </td>
