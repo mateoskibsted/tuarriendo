@@ -8,7 +8,6 @@ import Badge from '@/components/ui/Badge'
 import type { Pago } from '@/lib/types'
 import EditarPropiedadForm from './EditarPropiedadForm'
 import EliminarPropiedadButton from './EliminarPropiedadButton'
-import CodigoInvitacionSection from './CodigoInvitacionSection'
 import PagosSection from './PagosSection'
 import ContratoSection from './ContratoSection'
 import DesvincularButton from './DesvincularButton'
@@ -37,14 +36,7 @@ export default async function PropiedadPage({ params }: { params: Promise<{ id: 
     .eq('activo', true)
     .maybeSingle()
 
-  const { data: codigos } = await admin
-    .from('codigos_invitacion')
-    .select('*')
-    .eq('propiedad_id', id)
-    .order('created_at', { ascending: false })
-    .limit(5)
-
-  const { data: pagos } = contrato
+const { data: pagos } = contrato
     ? await admin
         .from('pagos')
         .select('*')
@@ -142,12 +134,6 @@ export default async function PropiedadPage({ params }: { params: Promise<{ id: 
                 arrendatario_informal_fecha_fin={propiedad.arrendatario_informal_fecha_fin}
                 whatsapp_estado={propiedad.whatsapp_estado}
               />
-              <div className="border-t border-gray-100 pt-4">
-                <p className="text-sm text-gray-600 mb-3">
-                  O genera un código de invitación para que tu arrendatario se registre y quede vinculado a esta propiedad.
-                </p>
-                <CodigoInvitacionSection propiedadId={id} codigos={codigos ?? []} />
-              </div>
             </div>
           )}
         </div>
