@@ -117,7 +117,7 @@ function buildNotificacion(params: {
     if (multaMonto) {
       const multaDiariaCLP = Math.round(multaMoneda === 'CLP' ? multaMonto : multaMonto * ufValue)
       const multaAcumuladaCLP = multaDiariaCLP * diasAtraso
-      const montoPrincipalCLP = moneda === 'CLP' ? valorUf : Math.round(valorUf * ufValue)
+      const montoPrincipalCLP = moneda === 'CLP' ? Math.round(Number(valorUf)) : Math.round(Number(valorUf) * ufValue)
       multaTexto = `\n\n⚠️ Multa diaria: ${formatCLPLocal(multaDiariaCLP)} CLP`
       if (diasAtraso > 1) multaTexto += `\n⚠️ Multa acumulada (${diasAtraso} dias): ${formatCLPLocal(multaAcumuladaCLP)} CLP`
       totalTexto = `\n💳 *Total a pagar: ${formatCLPLocal(montoPrincipalCLP + multaAcumuladaCLP)} CLP*`

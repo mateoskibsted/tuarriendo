@@ -165,8 +165,8 @@ export async function GET(request: NextRequest) {
           : propiedad.multa_monto * ufValue)
         const multaAcumuladaCLP = multaDiariaCLP * dias
         const montoPrincipalCLP = propiedad.moneda === 'CLP'
-          ? propiedad.valor_uf
-          : propiedad.valor_uf * ufValue
+          ? Math.round(Number(propiedad.valor_uf))
+          : Math.round(Number(propiedad.valor_uf) * ufValue)
         multaTexto = `\n\n⚠️ Multa diaria: ${formatCLPLocal(multaDiariaCLP)}`
         if (dias > 1) multaTexto += `\n⚠️ Multa acumulada (${dias} días): ${formatCLPLocal(multaAcumuladaCLP)}`
         totalTexto = `\n💳 *Total a pagar: ${formatCLPLocal(montoPrincipalCLP + multaAcumuladaCLP)}*`
