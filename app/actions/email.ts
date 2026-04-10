@@ -614,14 +614,23 @@ export async function confirmarPagoEmail(
     estado = esPagoCompleto ? 'pagado' : 'incompleto'
   }
 
+  const fechaPago = emailFecha ? new Date(emailFecha).toISOString() : new Date().toISOString()
+
+  // Un email = un solo pago. Bloquear solo si está registrado en un contrato DIFERENTE.
+  if (emailId) {
+    const emailOrigen = 'https://mail.google.com/mail/u/0/#all/' + emailId
+    const { data: yaUsado } = await admin.from('pagos').select('id, periodo, contrato_id').eq('email_origen', emailOrigen).maybeSingle()
+    if (yaUsado && yaUsado.contrato_id !== contratoId) {
+      return { error: 'Este correo ya fue registrado como pago del período ' + yaUsado.periodo + ' en otra propiedad.' }
+    }
+  }
+
   const { data: existing } = await admin
     .from('pagos')
     .select('id')
     .eq('contrato_id', contratoId)
     .eq('periodo', periodo)
     .maybeSingle()
-
-  const fechaPago = emailFecha ? new Date(emailFecha).toISOString() : new Date().toISOString()
 
   // UF value on the exact payment date for historical accuracy
   const ufValorDia = moneda !== 'CLP' ? await getUFValueForDate(fechaPago) : null
@@ -730,6 +739,15 @@ export async function confirmarPagoEmailInformal(
     .maybeSingle()
 
   const fechaPago = emailFecha ? new Date(emailFecha).toISOString() : new Date().toISOString()
+
+  // Un email = un solo pago. Bloquear solo si está registrado en una propiedad DIFERENTE.
+  if (emailId) {
+    const emailOrigen = 'https://mail.google.com/mail/u/0/#all/' + emailId
+    const { data: yaUsado } = await admin.from('pagos').select('id, periodo, propiedad_id').eq('email_origen', emailOrigen).maybeSingle()
+    if (yaUsado && yaUsado.propiedad_id !== propiedadId) {
+      return { error: 'Este correo ya fue registrado como pago del período ' + yaUsado.periodo + ' en otra propiedad.' }
+    }
+  }
 
   const ufValorDia = moneda !== 'CLP' ? await getUFValueForDate(fechaPago) : null
 
