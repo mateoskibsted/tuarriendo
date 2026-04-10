@@ -681,3 +681,89 @@ export async function confirmarPagoEmailInformal(
   revalidatePath(`/arrendador/propiedades/${propiedadId}`)
   return { success: true }
 }
+
+// ── Pagos detectados por el cron mientras el arrendador no estaba ──
+
+export async function obtenerPagosDetectadosCron(): Promise<{
+  error?: string
+  pagos?: {
+    id: string
+    email_id: string
+    contrato_id: string | null
+    propiedad_id: string | null
+    arrendatario_nombre: string
+    propiedad_nombre: string | null
+    monto_clp: number
+    periodo: string
+    fecha_transferencia: string | null
+    uf_valor_dia: number | null
+    gmail_link: string | null
+    created_at: string
+  }[]
+}> {
+  const { user, admin } = await getAuthContext()
+  if (!user) return { error: 'No autenticado' }
+
+  const { data, error } = await admin
+    .from('pagos_detectados_cron')
+    .select('*')
+    .eq('arrendador_id', user.id)
+    .eq('revisado', false)
+    .order('created_at', { ascending: false })
+
+  if (error) return { error: error.message }
+  return { pagos: data ?? [] }
+}
+
+export async function confirmarPagoDetectadoCron(
+  cronId: string,
+  contratoId: string | null,
+  propiedadId: string | null,
+  montoCLP: number,
+  periodo: string,
+  emailId: string | null,
+  fechaTransferencia: string | null,
+): Promise<{ error?: string; success?: boolean }> {
+  const { user, admin } = await getAuthContext()
+  if (!user) return { error: 'No autenticado' }
+
+  // Verify ownership
+  const { data: registro } = await admin
+    .from('pagos_detectados_cron')
+    .select('arrendador_id')
+    .eq('id', cronId)
+    .single()
+  if (!registro || registro.arrendador_id !== user.id) return { error: 'No autorizado' }
+
+  // Confirm the payment using existing logic
+  let result
+  if (contratoId) {
+    result = await confirmarPagoEmail(contratoId, montoCLP, periodo, emailId ?? '', fechaTransferencia ?? undefined)
+  } else if (propiedadId) {
+    result = await confirmarPagoEmailInformal(propiedadId, montoCLP, periodo, emailId ?? '', fechaTransferencia ?? undefined)
+  } else {
+    return { error: 'Sin contrato ni propiedad' }
+  }
+
+  if (result.error) return { error: result.error }
+
+  // Mark as revisado
+  await admin.from('pagos_detectados_cron').update({ revisado: true }).eq('id', cronId)
+
+  return { success: true }
+}
+
+export async function descartarPagoDetectadoCron(cronId: string): Promise<{ error?: string; success?: boolean }> {
+  const { user, admin } = await getAuthContext()
+  if (!user) return { error: 'No autenticado' }
+
+  const { data: registro } = await admin
+    .from('pagos_detectados_cron')
+    .select('arrendador_id')
+    .eq('id', cronId)
+    .single()
+  if (!registro || registro.arrendador_id !== user.id) return { error: 'No autorizado' }
+
+  await admin.from('pagos_detectados_cron').update({ revisado: true }).eq('id', cronId)
+  return { success: true }
+}

@@ -195,34 +195,39 @@ export async function GET(req: NextRequest) {
             const matched = amounts.find(a => tenant.montoBaseCLP > 0 && Math.abs(a - tenant.montoBaseCLP) / tenant.montoBaseCLP <= 0.15)
             if (!matched) continue
 
-            // Only auto-confirm high-confidence (covers full debt within $100)
+            // Only save high-confidence matches (covers full debt within $100)
             const faltante = Math.max(0, tenant.montoTotalCLP - matched)
-            if (faltante > 100) continue  // incomplete — skip auto-confirm, arrendador must review
+            if (faltante > 100) continue  // incomplete — skip, arrendador must review manually
 
-            // Calculate estado
-            const [py, pm] = periodoActual.split('-').map(Number)
-            const venc = new Date(py, pm - 1, /* dia */ 1)  // placeholder, recalculated below
-            void venc
-            const diasAtraso = tenant.montoTotalCLP > tenant.montoBaseCLP ? Math.round((tenant.montoTotalCLP - tenant.montoBaseCLP) / (tenant.montoTotalCLP - tenant.montoBaseCLP)) : 0
-            void diasAtraso
-            const estado = tenant.montoTotalCLP > tenant.montoBaseCLP ? 'atrasado' : 'pagado'
-
-            const notas = `Auto-confirmado por escáner. Monto recibido: $${matched.toLocaleString('es-CL')} CLP`
             const emailOrigen = `https://mail.google.com/mail/u/0/#all/${msg.id}`
             const fechaPago = new Date(emailFecha).toISOString()
             const ufValorDia = tenant.moneda !== 'CLP' ? await getUFValueForDate(fechaPago) : null
 
+            // Determine propiedad nombre
+            let propNombre: string | null = null
             if (tenant.tipo === 'contrato') {
-              const { data: existing } = await admin.from('pagos').select('id').eq('contrato_id', tenant.id).eq('periodo', periodoActual).maybeSingle()
-              const payload = { contrato_id: tenant.id, propiedad_id: null, periodo: periodoActual, valor_uf: tenant.moneda !== 'CLP' ? tenant.valorUf : 0, valor_clp: matched, uf_valor_dia: ufValorDia, estado, fecha_pago: fechaPago, notas, email_origen: emailOrigen }
-              if (existing) await admin.from('pagos').update(payload).eq('id', existing.id)
-              else await admin.from('pagos').insert(payload)
+              const c = (contratos ?? []).find((x: { id: string }) => x.id === tenant.id)
+              propNombre = (c as unknown as { propiedades?: { nombre: string } })?.propiedades?.nombre ?? null
             } else {
-              const { data: existing } = await admin.from('pagos').select('id').eq('propiedad_id', tenant.id).eq('periodo', periodoActual).maybeSingle()
-              const payload = { propiedad_id: tenant.id, contrato_id: null, periodo: periodoActual, valor_uf: tenant.moneda !== 'CLP' ? tenant.valorUf : 0, valor_clp: matched, uf_valor_dia: ufValorDia, estado, fecha_pago: fechaPago, notas, email_origen: emailOrigen }
-              if (existing) await admin.from('pagos').update(payload).eq('id', existing.id)
-              else await admin.from('pagos').insert(payload)
+              const p = (informales ?? []).find((x: { id: string }) => x.id === tenant.id)
+              propNombre = p?.nombre ?? null
             }
+
+            // Save to pagos_detectados_cron (pending arrendador review) instead of auto-confirming
+            await admin.from('pagos_detectados_cron').upsert({
+              arrendador_id: arrendadorId,
+              email_id: msg.id,
+              contrato_id: tenant.tipo === 'contrato' ? tenant.id : null,
+              propiedad_id: tenant.tipo === 'informal' ? tenant.id : null,
+              arrendatario_nombre: tenant.nombre,
+              propiedad_nombre: propNombre,
+              monto_clp: matched,
+              periodo: periodoActual,
+              fecha_transferencia: fechaPago,
+              uf_valor_dia: ufValorDia,
+              gmail_link: emailOrigen,
+              revisado: false,
+            }, { onConflict: 'arrendador_id,email_id', ignoreDuplicates: true })
 
             totalConfirmados++
             // Mark as processed so we don't double-count this tenant this run

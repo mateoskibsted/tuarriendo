@@ -5,6 +5,7 @@ import Badge from '@/components/ui/Badge'
 import { formatUF, formatCLP } from '@/lib/utils/uf'
 import { todayInChile } from '@/lib/utils/date'
 import PagosDetectadosAuto from './PagosDetectadosAuto'
+import PagosDetectadosCron from './PagosDetectadosCron'
 import type { Propiedad, Contrato } from '@/lib/types'
 
 const MAX_PROPIEDADES = 10
@@ -147,15 +148,18 @@ export default async function ArrendadorDashboard() {
 
       {/* Email scanner section */}
       {emailConnection ? (
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-bold text-gray-900">Pagos detectados en correo</h2>
-            <Link href="/arrendador/email" className="text-sm text-blue-700 hover:underline font-medium">
-              Ver historial →
-            </Link>
-          </div>
-          <PagosDetectadosAuto />
-        </section>
+        <>
+          <PagosDetectadosCron />
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-bold text-gray-900">Pagos detectados en correo</h2>
+              <Link href="/arrendador/email" className="text-sm text-blue-700 hover:underline font-medium">
+                Ver historial →
+              </Link>
+            </div>
+            <PagosDetectadosAuto />
+          </section>
+        </>
       ) : (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center gap-4">
           <div className="flex-1">
