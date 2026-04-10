@@ -437,11 +437,76 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
   // Rule-based matching: name + amount must both appear in the email
   const matches = matchEmails(parsedEmails, tenantsConCLP)
 
-  // Build final suggestions from AI matches only
+  // Check which tenants have the previous month unpaid (for period ambiguity)
+  const periodoAnterior = periodoAnteriorDe(periodoActual)
+  const allContratoIds = tenantsSinPagar.map(t => t.contratoId).filter(Boolean) as string[]
+  const allPropiedadIds = tenantsSinPagar.map(t => t.propiedadId).filter(Boolean) as string[]
+
+  const { data: pagosAnteriorContratos } = allContratoIds.length > 0
+    ? await admin.from('pagos').select('contrato_id')
+        .eq('periodo', periodoAnterior)
+        .in('estado', ['pagado', 'atrasado', 'incompleto'])
+        .in('contrato_id', allContratoIds)
+    : { data: [] }
+
+  const { data: pagosAnteriorPropiedades } = allPropiedadIds.length > 0
+    ? await admin.from('pagos').select('propiedad_id')
+        .eq('periodo', periodoAnterior)
+        .in('estado', ['pagado', 'atrasado', 'incompleto'])
+        .in('propiedad_id', allPropiedadIds)
+    : { data: [] }
+
+  const contratosYaPagadosAnterior = new Set(
+    (pagosAnteriorContratos ?? []).map((p: { contrato_id: string | null }) => p.contrato_id).filter(Boolean)
+  )
+  const propiedadesYaPagadasAnterior = new Set(
+    (pagosAnteriorPropiedades ?? []).map((p: { propiedad_id: string | null }) => p.propiedad_id).filter(Boolean)
+  )
+
+  // Build final suggestions from matches
   const sugerencias: PagoSugerido[] = matches.map(match => {
     const email = parsedEmails.find(e => e.idx === match.emailIdx)
     const tenant = tenantsConCLP.find(t => t.idx === match.tenantIdx)
     if (!email || !tenant) return null
+
+    const emailFecha = new Date(email.fecha)
+
+    // Detect period ambiguity: previous month unpaid for this tenant
+    const prevUnpaid = tenant.contratoId
+      ? !contratosYaPagadosAnterior.has(tenant.contratoId)
+      : tenant.propiedadId
+        ? !propiedadesYaPagadasAnterior.has(tenant.propiedadId)
+        : false
+
+    let periodos_disponibles: import('@/lib/types').PeriodoOpcion[] | undefined
+
+    if (prevUnpaid && tenant.diaPago) {
+      const opciones: import('@/lib/types').PeriodoOpcion[] = []
+
+      // Option 1: previous period (late payment)
+      const [py, pm] = periodoAnterior.split('-').map(Number)
+      const vencPrev = new Date(py, pm - 1, tenant.diaPago)
+      const diasPrev = Math.max(0, Math.floor((emailFecha.getTime() - vencPrev.getTime()) / 86400000))
+      opciones.push({
+        periodo: periodoAnterior,
+        label: `${periodoMesNombre(periodoAnterior)} — pago atrasado (${diasPrev} días)`,
+        dias_atraso: diasPrev,
+      })
+
+      // Option 2: current period
+      const [cy, cm] = periodoActual.split('-').map(Number)
+      const vencActual = new Date(cy, cm - 1, tenant.diaPago)
+      const diasActual = Math.max(0, Math.floor((emailFecha.getTime() - vencActual.getTime()) / 86400000))
+      opciones.push({
+        periodo: periodoActual,
+        label: diasActual > 0
+          ? `${periodoMesNombre(periodoActual)} — ${diasActual} días de atraso`
+          : `${periodoMesNombre(periodoActual)} — a tiempo`,
+        dias_atraso: diasActual,
+      })
+
+      if (opciones.length > 1) periodos_disponibles = opciones
+    }
 
     return {
       emailId: email.emailId,
@@ -456,6 +521,7 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
       propiedad_nombre: tenant.propiedadNombre,
       confianza: match.confianza,
       periodo: periodoActual,
+      periodos_disponibles,
     }
   }).filter(Boolean) as PagoSugerido[]
 
@@ -463,6 +529,20 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
   sugerencias.sort((a, b) => (a.confianza === 'alta' ? -1 : 1))
 
   return { sugerencias }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────
+
+function periodoMesNombre(periodo: string): string {
+  const [year, month] = periodo.split('-').map(Number)
+  const nombres = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+  return `${nombres[month - 1]} ${year}`
+}
+
+function periodoAnteriorDe(periodo: string): string {
+  const [y, m] = periodo.split('-').map(Number)
+  const prev = new Date(y, m - 2, 1)
+  return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`
 }
 
 export async function confirmarPagoEmail(
@@ -766,4 +846,68 @@ export async function descartarPagoDetectadoCron(cronId: string): Promise<{ erro
 
   await admin.from('pagos_detectados_cron').update({ revisado: true }).eq('id', cronId)
   return { success: true }
+}
+
+export async function obtenerPeriodosDisponibles(
+  contratoId: string | null | undefined,
+  propiedadId: string | null | undefined,
+  fechaPagoISO: string,
+  periodoActual: string,
+): Promise<{ opciones: import('@/lib/types').PeriodoOpcion[]; error?: string }> {
+  const { admin } = await getAuthContext()
+
+  // Get due day
+  let diaPago: number | null = null
+  if (contratoId) {
+    const { data } = await admin.from('contratos').select('dia_pago').eq('id', contratoId).single()
+    diaPago = data?.dia_pago ?? null
+  } else if (propiedadId) {
+    const { data } = await admin.from('propiedades').select('dia_vencimiento').eq('id', propiedadId).single()
+    diaPago = data?.dia_vencimiento ?? null
+  }
+
+  if (!diaPago) return { opciones: [] }
+
+  const fechaPago = new Date(fechaPagoISO)
+  const pAnterior = periodoAnteriorDe(periodoActual)
+
+  // Check if previous period is unpaid
+  let prevUnpaid = false
+  if (contratoId) {
+    const { data } = await admin.from('pagos').select('id')
+      .eq('contrato_id', contratoId).eq('periodo', pAnterior)
+      .in('estado', ['pagado', 'atrasado', 'incompleto']).maybeSingle()
+    prevUnpaid = !data
+  } else if (propiedadId) {
+    const { data } = await admin.from('pagos').select('id')
+      .eq('propiedad_id', propiedadId).eq('periodo', pAnterior)
+      .in('estado', ['pagado', 'atrasado', 'incompleto']).maybeSingle()
+    prevUnpaid = !data
+  }
+
+  const opciones: import('@/lib/types').PeriodoOpcion[] = []
+
+  if (prevUnpaid) {
+    const [py, pm] = pAnterior.split('-').map(Number)
+    const vencPrev = new Date(py, pm - 1, diaPago)
+    const dias = Math.max(0, Math.floor((fechaPago.getTime() - vencPrev.getTime()) / 86400000))
+    opciones.push({
+      periodo: pAnterior,
+      label: `${periodoMesNombre(pAnterior)} — pago atrasado (${dias} días)`,
+      dias_atraso: dias,
+    })
+  }
+
+  const [cy, cm] = periodoActual.split('-').map(Number)
+  const vencActual = new Date(cy, cm - 1, diaPago)
+  const diasActual = Math.max(0, Math.floor((fechaPago.getTime() - vencActual.getTime()) / 86400000))
+  opciones.push({
+    periodo: periodoActual,
+    label: diasActual > 0
+      ? `${periodoMesNombre(periodoActual)} — ${diasActual} días de atraso`
+      : `${periodoMesNombre(periodoActual)} — a tiempo`,
+    dias_atraso: diasActual,
+  })
+
+  return { opciones }
 }

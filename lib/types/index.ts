@@ -86,6 +86,12 @@ export interface EmailConnection {
   connected_at: string
 }
 
+export interface PeriodoOpcion {
+  periodo: string       // "YYYY-MM"
+  label: string         // "Marzo 2026 — pago atrasado (33 días)"
+  dias_atraso: number
+}
+
 export interface PagoSugerido {
   emailId: string
   fecha: string
@@ -102,4 +108,5 @@ export interface PagoSugerido {
   propiedad_nombre?: string
   confianza: 'alta' | 'media' | 'baja'
   periodo: string
+  periodos_disponibles?: PeriodoOpcion[]  // si hay ambigüedad de mes
 }
