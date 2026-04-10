@@ -4,6 +4,7 @@ import Link from 'next/link'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import { formatUF, formatCLP } from '@/lib/utils/uf'
+import { todayInChile } from '@/lib/utils/date'
 import PagosDetectadosAuto from './PagosDetectadosAuto'
 import type { Propiedad, Contrato } from '@/lib/types'
 
@@ -84,9 +85,10 @@ export default async function ArrendadorDashboard() {
   function diasDeAtraso(diaPago: number, periodo?: string): number {
     const [year, month] = (periodo ?? mesActual).split('-').map(Number)
     const vencimiento = new Date(year, month - 1, diaPago)
-    vencimiento.setHours(0, 0, 0, 0)
-    const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
-    return Math.max(0, Math.floor((hoy.getTime() - vencimiento.getTime()) / (24 * 60 * 60 * 1000)))
+    const hoy = todayInChile()
+    // Fine starts the day AFTER the due date (vencimiento is still valid)
+    if (hoy <= vencimiento) return 0
+    return Math.floor((hoy.getTime() - vencimiento.getTime()) / (24 * 60 * 60 * 1000))
   }
 
   // Para stats: contar pagados (incluye atrasados que ya pagaron)

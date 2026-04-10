@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import { v4 as uuidv4 } from 'uuid'
 import { cleanRut } from '@/lib/utils/rut'
 import { enviarWhatsApp } from '@/lib/utils/twilio'
+import { todayInChile } from '@/lib/utils/date'
 
 function normalizePhone(raw: string): string | null {
   if (!raw?.trim()) return null
@@ -114,6 +115,8 @@ export async function actualizarPropiedad(id: string, formData: FormData) {
   if (error) return { error: error.message }
 
   revalidatePath('/arrendador')
+  revalidatePath(`/arrendador/propiedades/${id}`)
+  revalidatePath('/arrendador/propiedades')
   return { success: true }
 }
 
@@ -413,8 +416,7 @@ export async function registrarPagoInformal(propiedadId: string, formData: FormD
   if (estado === 'pagado' && propiedad.dia_vencimiento) {
     const [year, month] = periodo.split('-').map(Number)
     const fechaVencimiento = new Date(year, month - 1, propiedad.dia_vencimiento)
-    const hoy = new Date()
-    hoy.setHours(0, 0, 0, 0)
+    const hoy = todayInChile()
     if (hoy > fechaVencimiento) {
       const diasAtraso = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / (24 * 60 * 60 * 1000))
       estado = 'atrasado'

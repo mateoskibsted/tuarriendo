@@ -6,6 +6,7 @@ import { google } from 'googleapis'
 import { revalidatePath } from 'next/cache'
 import { extractTextFromPayload, decodeBase64Url } from '@/lib/utils/email-parser'
 import { getUFValue } from '@/lib/utils/uf'
+import { todayInChile } from '@/lib/utils/date'
 import type { PagoSugerido } from '@/lib/types'
 
 async function getAuthContext() {
@@ -342,13 +343,14 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
 
   // Calculate total expected (base + fine if overdue) for each tenant
   const [year, month] = periodoActual.split('-').map(Number)
-  const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
+  const hoy = todayInChile()
 
   const tenantsConCLP = tenantsSinPagar.map(t => {
     const monto_clp = t.moneda === 'UF' ? Math.round(t.monto * ufValue) : t.monto
     let multa = 0
     if (t.diaPago && t.multaMonto) {
       const venc = new Date(year, month - 1, t.diaPago)
+      // Fine starts the day AFTER the due date
       if (hoy > venc) {
         const dias = Math.floor((hoy.getTime() - venc.getTime()) / 86400000)
         multa = dias * t.multaMonto
@@ -501,7 +503,7 @@ export async function confirmarPagoEmail(
   if (diaPago) {
     const [year, month] = periodo.split('-').map(Number)
     const fechaVencimiento = new Date(year, month - 1, diaPago)
-    const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
+    const hoy = todayInChile()
     if (hoy > fechaVencimiento) {
       diasAtraso = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / 86400000)
       multaTotal = propiedadData?.multa_monto ? diasAtraso * propiedadData.multa_monto : 0
@@ -609,7 +611,7 @@ export async function confirmarPagoEmailInformal(
   if (propiedad.dia_vencimiento) {
     const [year, month] = periodo.split('-').map(Number)
     const fechaVencimiento = new Date(year, month - 1, propiedad.dia_vencimiento)
-    const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
+    const hoy = todayInChile()
     if (hoy > fechaVencimiento) {
       diasAtraso = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / 86400000)
       multaTotal = propiedad.multa_monto ? diasAtraso * propiedad.multa_monto : 0
