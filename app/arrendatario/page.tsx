@@ -4,10 +4,11 @@ import Badge from '@/components/ui/Badge'
 import { formatUF, formatCLP, getUFValue } from '@/lib/utils/uf'
 import type { Pago, EstadoPago } from '@/lib/types'
 
-const estadoBadge: Record<EstadoPago, { label: string; variant: 'green' | 'red' | 'yellow' }> = {
+const estadoBadge: Record<EstadoPago, { label: string; variant: 'green' | 'red' | 'yellow' | 'orange' | 'blue' | 'gray' }> = {
   pagado: { label: 'Pagado', variant: 'green' },
   pendiente: { label: 'Pendiente', variant: 'yellow' },
-  atrasado: { label: 'Atrasado', variant: 'red' },
+  atrasado: { label: 'Pagado (tarde)', variant: 'green' },
+  incompleto: { label: 'Incompleto', variant: 'orange' },
 }
 
 export default async function ArrendatarioDashboard() {
