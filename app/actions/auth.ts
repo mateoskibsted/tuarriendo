@@ -4,7 +4,9 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
 import { cleanRut, validateRut } from '@/lib/utils/rut'
+import { checkRateLimit, clearRateLimit } from '@/lib/utils/rate-limit'
 import type { Role } from '@/lib/types'
 
 export async function login(formData: FormData) {
@@ -13,6 +15,19 @@ export async function login(formData: FormData) {
 
   if (!validateRut(rut)) {
     return { error: 'RUT inválido' }
+  }
+
+  // Rate limiting by IP
+  const headersList = await headers()
+  const ip =
+    headersList.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+    headersList.get('x-real-ip') ??
+    'unknown'
+
+  const rateLimit = await checkRateLimit(ip)
+  if (!rateLimit.allowed) {
+    const minutos = Math.ceil(rateLimit.retryAfterSeconds / 60)
+    return { error: `Demasiados intentos fallidos. Intenta de nuevo en ${minutos} minuto${minutos !== 1 ? 's' : ''}.` }
   }
 
   // Use admin client to look up email by RUT — user isn't authenticated yet
@@ -36,6 +51,9 @@ export async function login(formData: FormData) {
   if (error) {
     return { error: 'Contraseña incorrecta' }
   }
+
+  // Clear attempts on successful login
+  await clearRateLimit(ip)
 
   revalidatePath('/', 'layout')
   redirect(profile.role === 'arrendador' ? '/arrendador' : '/arrendatario')
