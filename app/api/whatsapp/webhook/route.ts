@@ -7,7 +7,7 @@ export async function GET() {
   return new NextResponse('WhatsApp webhook OK', { status: 200 })
 }
 
-// ── TwiML helpers ────────────────────────────────────────────────────────────
+// ── TwiML helpers ─────────────────────────────────────────────────────────────
 
 function escapeXml(s: string): string {
   return s
@@ -18,8 +18,15 @@ function escapeXml(s: string): string {
     .replace(/'/g, '&apos;')
 }
 
+/** Send one message via TwiML */
 function twiml(message: string): NextResponse {
   const xml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(message)}</Message></Response>`
+  return new NextResponse(xml, { status: 200, headers: { 'Content-Type': 'text/xml; charset=utf-8' } })
+}
+
+/** Send two messages via TwiML (welcome + daily notification) */
+function twimlDos(msg1: string, msg2: string): NextResponse {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(msg1)}</Message><Message>${escapeXml(msg2)}</Message></Response>`
   return new NextResponse(xml, { status: 200, headers: { 'Content-Type': 'text/xml; charset=utf-8' } })
 }
 
@@ -40,36 +47,97 @@ function phoneMatch(stored: string, incoming: string): boolean {
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 
-async function formatMonto(valorUf: number, moneda: string): Promise<string> {
-  if (moneda === 'CLP') {
-    return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(valorUf)
-  }
-  try {
-    const uf = await getUFValue()
-    const clp = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(Math.round(valorUf * uf))
-    return `${valorUf.toFixed(2)} UF (${clp})`
-  } catch {
-    return `${valorUf.toFixed(2)} UF`
-  }
+function formatCLPLocal(n: number) {
+  return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 }).format(n)
 }
 
-function estadoPagoTexto(diaPago: number): string {
+/** "10,50 UF ($368.450 CLP)" or "$2 CLP" */
+function formatMonto(valorUf: number, moneda: string, ufValue: number): string {
+  if (moneda === 'CLP') return `${formatCLPLocal(valorUf)} CLP`
+  const clp = formatCLPLocal(Math.round(valorUf * ufValue))
+  return `${valorUf.toFixed(2)} UF (${clp} CLP)`
+}
+
+// ── Notification message builder (same logic as cron) ────────────────────────
+
+function buildNotificacion(params: {
+  nombre: string
+  propNombre: string
+  diaPago: number
+  valorUf: number
+  moneda: string
+  multaMonto: number | null | undefined
+  multaMoneda: string | null | undefined
+  ufValue: number
+}): string | null {
+  const { nombre, propNombre, diaPago, valorUf, moneda, multaMonto, multaMoneda, ufValue } = params
   const hoy = todayInChile()
-  const [y, m] = [hoy.getFullYear(), hoy.getMonth()]
-  const venc = new Date(y, m, diaPago)
-  if (hoy <= venc) {
-    const dias = Math.ceil((venc.getTime() - hoy.getTime()) / 86400000)
-    const mesNombre = venc.toLocaleDateString('es-CL', { month: 'long' })
-    return `Proximo pago: dia ${diaPago} de ${mesNombre} (faltan ${dias} dias)`
+  const fechaVenc = new Date(hoy.getFullYear(), hoy.getMonth(), diaPago)
+  const dias = Math.round((fechaVenc.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24))
+
+  const montoTexto = formatMonto(valorUf, moneda, ufValue)
+
+  if (dias === 2) {
+    return (
+      `Hola ${nombre}\n\n` +
+      `En 2 dias vence el plazo de pago de tu arriendo de *${propNombre}*.\n\n` +
+      `💰 Monto: ${montoTexto}\n\n` +
+      `Realiza tu pago a tiempo para evitar multas.`
+    )
   }
-  const dias = Math.floor((hoy.getTime() - venc.getTime()) / 86400000)
-  return `ATENCION: llevas ${dias} dia${dias !== 1 ? 's' : ''} de atraso desde el dia ${diaPago}`
+
+  if (dias === 1) {
+    return (
+      `Hola ${nombre}\n\n` +
+      `Mañana vence el plazo de pago de tu arriendo de *${propNombre}*.\n\n` +
+      `💰 Monto: ${montoTexto}\n\n` +
+      `No olvides realizar el pago.`
+    )
+  }
+
+  if (dias === 0) {
+    let multaInfo = ''
+    if (multaMonto) {
+      const multaDiariaCLP = Math.round(multaMoneda === 'CLP' ? multaMonto : multaMonto * ufValue)
+      multaInfo = `\n⚠️ A partir de mañana se aplicará una multa de ${formatCLPLocal(multaDiariaCLP)} CLP por cada día de atraso.`
+    }
+    return (
+      `Hola ${nombre}\n\n` +
+      `Hoy vence el plazo de pago de tu arriendo de *${propNombre}*.\n\n` +
+      `💰 Monto: ${montoTexto}` +
+      multaInfo +
+      `\n\nRealiza el pago hoy para evitar multas.`
+    )
+  }
+
+  if (dias < 0) {
+    const diasAtraso = Math.abs(dias)
+    let multaTexto = ''
+    let totalTexto = ''
+    if (multaMonto) {
+      const multaDiariaCLP = Math.round(multaMoneda === 'CLP' ? multaMonto : multaMonto * ufValue)
+      const multaAcumuladaCLP = multaDiariaCLP * diasAtraso
+      const montoPrincipalCLP = moneda === 'CLP' ? valorUf : Math.round(valorUf * ufValue)
+      multaTexto = `\n\n⚠️ Multa diaria: ${formatCLPLocal(multaDiariaCLP)} CLP`
+      if (diasAtraso > 1) multaTexto += `\n⚠️ Multa acumulada (${diasAtraso} dias): ${formatCLPLocal(multaAcumuladaCLP)} CLP`
+      totalTexto = `\n💳 *Total a pagar: ${formatCLPLocal(montoPrincipalCLP + multaAcumuladaCLP)} CLP*`
+    }
+    return (
+      `Hola ${nombre}\n\n` +
+      `Tu arriendo de *${propNombre}* lleva *${diasAtraso} dia${diasAtraso !== 1 ? 's' : ''} de atraso*.\n\n` +
+      `💰 Monto arriendo: ${montoTexto}` +
+      multaTexto +
+      totalTexto +
+      `\n\nPor favor regulariza tu situacion lo antes posible.`
+    )
+  }
+
+  return null
 }
 
 // ── POST handler ──────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  // Parse Twilio form-encoded body
   let fromRaw = ''
   let msgRaw = ''
 
@@ -95,7 +163,6 @@ export async function POST(req: NextRequest) {
 
   if (!fromRaw) return emptyTwiml()
 
-  // Normalize message: remove accents, uppercase
   const msgUp = msgRaw.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
   const esSi = msgUp === 'SI' || msgUp === 'S'
   const esNo = msgUp === 'NO' || msgUp === 'N'
@@ -103,11 +170,11 @@ export async function POST(req: NextRequest) {
   const admin = createAdminClient()
 
   try {
-    // ── 1. Check informal arrendatarios (propiedades) ──────────────────────
+    // ── 1. Informal arrendatarios ──────────────────────────────────────────
 
     const { data: propiedades } = await admin
       .from('propiedades')
-      .select('id, nombre, dia_vencimiento, valor_uf, moneda, arrendatario_informal_nombre, arrendatario_informal_celular, arrendatario_informal_cobro_tipo, arrendatario_informal_fecha_inicio, arrendatario_informal_fecha_fin')
+      .select('id, nombre, dia_vencimiento, valor_uf, moneda, multa_monto, multa_moneda, arrendatario_informal_nombre, arrendatario_informal_celular, arrendatario_informal_cobro_tipo, arrendatario_informal_fecha_inicio, arrendatario_informal_fecha_fin')
       .eq('activa', true)
       .not('arrendatario_informal_celular', 'is', null)
 
@@ -119,7 +186,7 @@ export async function POST(req: NextRequest) {
       return await handleInformal(propiedadMatch, msgUp, esSi, esNo, admin)
     }
 
-    // ── 2. Check formal arrendatarios (profiles) ───────────────────────────
+    // ── 2. Formal arrendatarios ────────────────────────────────────────────
 
     const { data: profiles } = await admin
       .from('profiles')
@@ -134,7 +201,6 @@ export async function POST(req: NextRequest) {
       return await handleFormal(profileMatch, msgUp, esSi, esNo, admin)
     }
 
-    // ── 3. Unknown number ──────────────────────────────────────────────────
     return twiml('Tu numero no esta registrado en el sistema. Contacta a tu arrendador.')
   } catch (err) {
     console.error('Webhook error:', err)
@@ -145,27 +211,36 @@ export async function POST(req: NextRequest) {
 // ── Informal arrendatario handler ─────────────────────────────────────────────
 
 async function handleInformal(
-  propiedad: Record<string, unknown>,
+  p: Record<string, unknown>,
   msgUp: string,
   esSi: boolean,
   esNo: boolean,
   admin: ReturnType<typeof createAdminClient>,
 ): Promise<NextResponse> {
-  const nombre = (propiedad.arrendatario_informal_nombre as string | null) ?? 'arrendatario'
-  const dia = (propiedad.dia_vencimiento as number | null) ?? 5
-  const propNombre = propiedad.nombre as string
-  const valorUf = propiedad.valor_uf as number
-  const moneda = propiedad.moneda as string
+  const nombre = (p.arrendatario_informal_nombre as string | null) ?? 'arrendatario'
+  const dia = (p.dia_vencimiento as number | null) ?? 5
+  const propNombre = p.nombre as string
+  const valorUf = p.valor_uf as number
+  const moneda = p.moneda as string
+  const multaMonto = p.multa_monto as number | null
+  const multaMoneda = p.multa_moneda as string | null
 
   if (esSi) {
-    await admin.from('propiedades').update({ whatsapp_estado: 'confirmado' }).eq('id', propiedad.id as string)
+    await admin.from('propiedades').update({ whatsapp_estado: 'confirmado' }).eq('id', p.id as string)
 
-    const montoTexto = await formatMonto(valorUf, moneda)
-    const estadoTexto = estadoPagoTexto(dia)
-    const cobroTipo = propiedad.arrendatario_informal_cobro_tipo === 'atrasado' ? 'mes vencido' : 'mes adelantado'
+    const ufValue = await getUFValue()
+    const montoTexto = formatMonto(valorUf, moneda, ufValue)
+    const cobroTipo = p.arrendatario_informal_cobro_tipo === 'atrasado' ? 'mes vencido' : 'mes adelantado'
+
+    // Multa info for welcome message
+    let multaInfo = ''
+    if (multaMonto) {
+      const multaDiariaCLP = Math.round(multaMoneda === 'CLP' ? multaMonto : multaMonto * ufValue)
+      multaInfo = `\nMulta por atraso: ${formatCLPLocal(multaDiariaCLP)} CLP/dia`
+    }
 
     let duracion = ''
-    const fechaFin = propiedad.arrendatario_informal_fecha_fin as string | null
+    const fechaFin = p.arrendatario_informal_fecha_fin as string | null
     if (fechaFin) {
       const fin = new Date(fechaFin + 'T12:00:00')
       const hoy = todayInChile()
@@ -173,24 +248,36 @@ async function handleInformal(
       duracion = `\nContrato hasta: ${fin.toLocaleDateString('es-CL')}${meses > 0 ? ` (${meses} meses restantes)` : ' (vencido)'}`
     }
 
-    return twiml(
+    const hoy = todayInChile()
+    const fechaVenc = new Date(hoy.getFullYear(), hoy.getMonth(), dia)
+    const diasRestantes = Math.round((fechaVenc.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24))
+    const estadoTexto = diasRestantes >= 0
+      ? `Proximo pago: dia ${dia} de cada mes (faltan ${diasRestantes} dias)`
+      : `ATENCION: llevas ${Math.abs(diasRestantes)} dia${Math.abs(diasRestantes) !== 1 ? 's' : ''} de atraso desde el dia ${dia}`
+
+    const welcome =
       `Listo, ${nombre}! Quedaste conectado a los recordatorios de ${propNombre}.\n\n` +
       `Arriendo: ${montoTexto}/mes\n` +
       `Vencimiento: dia ${dia} de cada mes\n` +
       `Cobro: ${cobroTipo}` +
+      multaInfo +
       duracion +
       `\n\n${estadoTexto}`
-    )
+
+    // Check if today is a notification trigger day → send it as second message
+    const notif = buildNotificacion({ nombre, propNombre, diaPago: dia, valorUf, moneda, multaMonto, multaMoneda, ufValue })
+    if (notif) return twimlDos(welcome, notif)
+    return twiml(welcome)
   }
 
   if (esNo) {
-    await admin.from('propiedades').update({ whatsapp_estado: 'rechazado' }).eq('id', propiedad.id as string)
+    await admin.from('propiedades').update({ whatsapp_estado: 'rechazado' }).eq('id', p.id as string)
     return twiml(`Entendido, ${nombre}. Tu decision fue registrada y sera comunicada a tu arrendador.`)
   }
 
   return twiml(
     `Hola ${nombre}! Soy el asistente de arriendos de ${propNombre}.\n\n` +
-    `Responde *Si* para confirmar que quieres recibir recordatorios de pago, o *No* para rechazarlos.`
+    `Responde *Si* para confirmar recordatorios de pago, o *No* para rechazarlos.`
   )
 }
 
@@ -205,10 +292,9 @@ async function handleFormal(
 ): Promise<NextResponse> {
   const nombre = profile.nombre.split(' ')[0]
 
-  // Find active contracts for this arrendatario
   const { data: contratos } = await admin
     .from('contratos')
-    .select('id, propiedad_id, dia_pago, propiedades(nombre, valor_uf, moneda)')
+    .select('id, propiedad_id, dia_pago, propiedades(nombre, valor_uf, moneda, multa_monto, multa_moneda)')
     .eq('arrendatario_id', profile.id)
     .eq('activo', true)
 
@@ -216,61 +302,10 @@ async function handleFormal(
     return twiml(`Hola ${nombre}! No tienes contratos activos en el sistema. Contacta a tu arrendador.`)
   }
 
-  // Current period
   const hoy = todayInChile()
   const periodoActual = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`
 
-  if (esSi || (!esNo && msgUp !== '')) {
-    // Build payment status for each property
-    const lineas: string[] = []
-
-    for (const contrato of contratos) {
-      const prop = (contrato as unknown as { propiedades: { nombre: string; valor_uf: number; moneda: string } }).propiedades
-      if (!prop) continue
-
-      const diaPago = (contrato as unknown as { dia_pago: number }).dia_pago ?? 5
-
-      // Check if already paid this period
-      const { data: pago } = await admin
-        .from('pagos')
-        .select('estado, fecha_pago')
-        .eq('contrato_id', contrato.id)
-        .eq('periodo', periodoActual)
-        .maybeSingle()
-
-      const montoTexto = await formatMonto(prop.valor_uf, prop.moneda)
-      const estadoTexto = estadoPagoTexto(diaPago)
-
-      if (pago && (pago.estado === 'pagado' || pago.estado === 'atrasado')) {
-        const fechaPago = pago.fecha_pago ? new Date(pago.fecha_pago).toLocaleDateString('es-CL') : 'fecha no registrada'
-        lineas.push(`${prop.nombre}: PAGADO el ${fechaPago}`)
-      } else {
-        lineas.push(`${prop.nombre}: ${montoTexto}/mes\n  ${estadoTexto}`)
-      }
-    }
-
-    // Log the interaction
-    if (esSi) {
-      for (const contrato of contratos) {
-        await admin.from('notificaciones_log').insert({
-          contrato_id: contrato.id,
-          tipo: 'confirmacion_whatsapp',
-          periodo: periodoActual,
-          mensaje: `${nombre} respondio SI al bot de WhatsApp`,
-          exitosa: true,
-        })
-      }
-    }
-
-    return twiml(
-      `Hola ${nombre}! Aqui tienes el estado de tus arriendos:\n\n` +
-      lineas.join('\n\n') +
-      `\n\nResponde *No* si no quieres recibir mas recordatorios.`
-    )
-  }
-
   if (esNo) {
-    // Log refusal
     for (const contrato of contratos) {
       await admin.from('notificaciones_log').insert({
         contrato_id: contrato.id,
@@ -283,7 +318,84 @@ async function handleFormal(
     return twiml(`Entendido, ${nombre}. No te enviaremos mas recordatorios por WhatsApp. Puedes cambiar esto contactando a tu arrendador.`)
   }
 
-  // Unknown message — help text
+  if (esSi || msgUp !== '') {
+    const ufValue = await getUFValue()
+    const lineas: string[] = []
+    const notificaciones: string[] = []
+
+    for (const contrato of contratos) {
+      const prop = (contrato as unknown as { propiedades: { nombre: string; valor_uf: number; moneda: string; multa_monto?: number | null; multa_moneda?: string | null } }).propiedades
+      if (!prop) continue
+
+      const diaPago = (contrato as unknown as { dia_pago: number }).dia_pago ?? 5
+
+      const { data: pago } = await admin
+        .from('pagos')
+        .select('estado, fecha_pago')
+        .eq('contrato_id', contrato.id)
+        .eq('periodo', periodoActual)
+        .maybeSingle()
+
+      const montoTexto = formatMonto(prop.valor_uf, prop.moneda, ufValue)
+
+      let multaInfo = ''
+      if (prop.multa_monto) {
+        const multaDiariaCLP = Math.round(prop.multa_moneda === 'CLP' ? prop.multa_monto : prop.multa_monto * ufValue)
+        multaInfo = ` (multa: ${formatCLPLocal(multaDiariaCLP)} CLP/dia si atraso)`
+      }
+
+      if (pago && (pago.estado === 'pagado' || pago.estado === 'atrasado')) {
+        const fechaPago = pago.fecha_pago ? new Date(pago.fecha_pago).toLocaleDateString('es-CL') : 'fecha no registrada'
+        lineas.push(`${prop.nombre}: PAGADO el ${fechaPago} ✓`)
+      } else {
+        const fechaVenc = new Date(hoy.getFullYear(), hoy.getMonth(), diaPago)
+        const dias = Math.round((fechaVenc.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24))
+        const estadoTexto = dias >= 0
+          ? `Vence en ${dias} dias (dia ${diaPago})`
+          : `${Math.abs(dias)} dia${Math.abs(dias) !== 1 ? 's' : ''} de atraso`
+        lineas.push(`${prop.nombre}: ${montoTexto}/mes\n  ${estadoTexto}${multaInfo}`)
+
+        // Only add notification if today is a trigger day and not already sent today
+        const tipoNotif = dias === 2 ? 'aviso_2d' : dias === 1 ? 'aviso_1d' : dias === 0 ? 'vencimiento' : dias < 0 ? `atraso_${Math.abs(dias)}` : null
+        if (tipoNotif) {
+          const { data: yaEnviado } = await admin.from('notificaciones_log')
+            .select('id').eq('contrato_id', contrato.id).eq('tipo', tipoNotif).eq('periodo', periodoActual).maybeSingle()
+          if (!yaEnviado) {
+            const notif = buildNotificacion({
+              nombre, propNombre: prop.nombre, diaPago,
+              valorUf: prop.valor_uf, moneda: prop.moneda,
+              multaMonto: prop.multa_monto ?? null,
+              multaMoneda: prop.multa_moneda ?? null,
+              ufValue,
+            })
+            if (notif) notificaciones.push(notif)
+          }
+        }
+      }
+    }
+
+    if (esSi) {
+      for (const contrato of contratos) {
+        await admin.from('notificaciones_log').insert({
+          contrato_id: contrato.id,
+          tipo: 'confirmacion_whatsapp',
+          periodo: periodoActual,
+          mensaje: `${nombre} respondio SI al bot de WhatsApp`,
+          exitosa: true,
+        })
+      }
+    }
+
+    const welcome =
+      `Hola ${nombre}! Estado de tus arriendos:\n\n` +
+      lineas.join('\n\n') +
+      `\n\nResponde *No* para dejar de recibir recordatorios.`
+
+    // Send welcome + first pending notification if exists
+    if (notificaciones.length > 0) return twimlDos(welcome, notificaciones[0])
+    return twiml(welcome)
+  }
+
   return twiml(
     `Hola ${nombre}! Soy el asistente de arriendos.\n\n` +
     `Responde *Si* para ver el estado de tus pagos, o *No* para dejar de recibir recordatorios.`
