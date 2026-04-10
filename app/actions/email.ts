@@ -67,6 +67,55 @@ function extractTransferDateISO(rawContent: string, emailDateHeader: string): st
   return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString()
 }
 
+/**
+ * Returns true only if the tenant name appears as SENDER (incoming transfer to arrendador).
+ * In BICE and most Chilean bank emails:
+ *   - Incoming: tenant name is under "Cuenta de origen"
+ *   - Outgoing: tenant name is under "Cuenta de destino"
+ * Also filters generic outgoing keywords.
+ */
+function isTenantSender(tenantName: string, subject: string, rawContent: string): boolean {
+  const combined = (subject + ' ' + rawContent)
+  const combinedNorm = combined.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
+  // Hard exclusion: clear outgoing transfer keywords
+  const outgoingKeywords = [
+    'realizaste una transferencia',
+    'efectuaste una transferencia',
+    'has realizado una transferencia',
+    'transferencia enviada',
+    'tu transferencia fue realizada',
+    'has transferido',
+    'transferiste',
+  ]
+  if (outgoingKeywords.some(k => combinedNorm.includes(k))) return false
+
+  // BICE/Chilean banks: check if name appears near "cuenta de destino" (outgoing)
+  // vs "cuenta de origen" (incoming). Search normalized text for these anchors.
+  const nameNorm = tenantName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(' ')[0]
+  const destIdx = combinedNorm.indexOf('cuenta de destino')
+  const origIdx = combinedNorm.indexOf('cuenta de origen')
+
+  if (destIdx !== -1 || origIdx !== -1) {
+    // Find where the tenant name appears relative to these anchors
+    const nameIdx = combinedNorm.indexOf(nameNorm)
+    if (nameIdx === -1) return false
+
+    // If name is closer to "cuenta de destino" → outgoing → exclude
+    // If name is closer to "cuenta de origen" → incoming → include
+    if (destIdx !== -1 && origIdx !== -1) {
+      const distToDest = Math.abs(nameIdx - destIdx)
+      const distToOrig = Math.abs(nameIdx - origIdx)
+      return distToOrig < distToDest  // closer to origen = incoming
+    }
+    if (destIdx !== -1 && origIdx === -1) return false  // only dest anchor found = outgoing
+    if (origIdx !== -1 && destIdx === -1) return true   // only origen anchor found = incoming
+  }
+
+  // No structural anchors found — fall back to incoming (let amount matching decide)
+  return true
+}
+
 /** Normalize text: lowercase, remove accents and punctuation */
 function normalizeText(text: string): string {
   return text
@@ -126,24 +175,25 @@ function matchEmails(
     const amounts = extractAmounts(email.rawContent)
 
     for (const tenant of tenants) {
-      const nameMatch = nameMatchesContent(tenant.nombre, email.rawContent)
-      if (!nameMatch) continue
+      // Check name appears as SENDER (incoming), not recipient (outgoing)
+      if (!isTenantSender(tenant.nombre, '', email.rawContent)) continue
 
       const base = tenant.monto_clp
       const total = tenant.monto_total_esperado
 
-      // Accept any amount within ±15% of the base amount
+      // Candidate match: amount must be within ±15% of BASE amount only
+      // (using total would allow false positives when fine inflates expected amount)
       const matchedAmount = amounts.find(a => {
         if (base === 0) return false
-        return Math.abs(a - base) / base <= 0.15 || Math.abs(a - total) / total <= 0.15
+        return Math.abs(a - base) / base <= 0.15
       })
 
       if (matchedAmount === undefined) continue
 
-      // Exact = covers the full debt (base + fine) within ±5%
-      const coversTotal = total > 0 && Math.abs(matchedAmount - total) / total <= 0.05
-      const confianza: 'alta' | 'media' = coversTotal ? 'alta' : 'media'
+      // Completeness: does the received amount cover the full debt (base + fine)?
       const monto_faltante = Math.max(0, total - matchedAmount)
+      const coversTotal = monto_faltante <= 100  // tolerance $100
+      const confianza: 'alta' | 'media' = coversTotal ? 'alta' : 'media'
 
       results.push({ emailIdx: email.idx, tenantIdx: tenant.idx, confianza, monto_clp: matchedAmount, monto_faltante })
     }
