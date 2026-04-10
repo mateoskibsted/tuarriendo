@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, Fragment } from 'react'
 import { registrarPago, registrarPagoInformal, eliminarPago } from '@/app/actions/arrendador'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
@@ -173,7 +173,8 @@ export default function PagosSection({
                 <tr className="border-b border-gray-200">
                   <th className="text-left py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Período</th>
                   <th className="text-right py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">{montoHeader}</th>
-                  <th className="text-right py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Deuda período</th>
+                  <th className="text-right py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Depositado</th>
+                  <th className="text-right py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Saldo pendiente</th>
                   <th className="text-center py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Estado</th>
                   <th className="text-center py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Fecha pago</th>
                   <th className="text-right py-2 px-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Acciones</th>
@@ -183,11 +184,29 @@ export default function PagosSection({
                 {todasLasFilas.map((fila) => {
                   if (fila.tipo === 'virtual') {
                     const esPasado = fila.periodo < currentPeriodo
+                    // Calcular multa acumulada para períodos pasados sin pago
+                    let multaVirtual = 0
+                    if (esPasado && diaVencimiento && multaMonto) {
+                      const [py, pm] = fila.periodo.split('-').map(Number)
+                      const venc = new Date(py, pm - 1, diaVencimiento)
+                      venc.setHours(0, 0, 0, 0)
+                      const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
+                      if (hoy > venc) {
+                        const dias = Math.floor((hoy.getTime() - venc.getTime()) / 86400000)
+                        multaVirtual = dias * multaMonto
+                      }
+                    }
+                    const saldoVirtual = esCLP
+                      ? formatCLP(valorUf + multaVirtual)
+                      : formatUF(valorUf) + (multaVirtual > 0 ? ` + $${multaVirtual.toLocaleString('es-CL')}` : '')
                     return (
                       <tr key={`virtual-${fila.periodo}`} className="border-b border-gray-50 opacity-50">
                         <td className="py-2 px-2 font-mono text-gray-500">{fila.periodo}</td>
                         <td className="py-2 px-2 text-right text-gray-400">{montoBaseVirtual()}</td>
                         <td className="py-2 px-2 text-right text-gray-300">—</td>
+                        <td className={`py-2 px-2 text-right text-sm font-medium ${esPasado ? 'text-red-400' : 'text-gray-400'}`}>
+                          {saldoVirtual}
+                        </td>
                         <td className="py-2 px-2 text-center">
                           <Badge variant={esPasado ? 'red' : 'yellow'}>{esPasado ? 'Sin registrar' : 'Pendiente'}</Badge>
                         </td>
@@ -203,17 +222,27 @@ export default function PagosSection({
                   const { dias: filaDiasAtraso, multa: filaMulta } = calcularAtraso(pago)
                   const tieneAtraso = filaDiasAtraso > 0 || pago.estado === 'atrasado'
 
-                  // Deuda total: base + multa (solo si hay atraso real con multa configurada)
-                  let deudaTotal = '—'
-                  if (tieneAtraso && filaMulta > 0) {
-                    const baseClp = pago.valor_clp ?? (esCLP ? valorUf : null)
-                    if (baseClp !== null) deudaTotal = formatCLP(baseClp + filaMulta)
+                  // Saldo pendiente = (valor mensual + multa) - depositado
+                  const baseClp = esCLP ? valorUf : (pago.valor_clp ?? 0)
+                  const totalEsperado = baseClp + filaMulta
+                  const depositado = pago.valor_clp ?? 0
+                  const saldoNum = totalEsperado - depositado
+                  let saldoDisplay = '—'
+                  let saldoColor = 'text-gray-300'
+                  if (pago.estado !== 'pendiente') {
+                    if (saldoNum > 100) {
+                      saldoDisplay = formatCLP(saldoNum)
+                      saldoColor = 'text-red-500 font-semibold'
+                    } else if (depositado > 0) {
+                      saldoDisplay = 'Saldado'
+                      saldoColor = 'text-green-500 font-medium'
+                    }
                   }
 
                   if (isEditing) {
                     return (
                       <tr key={pago.id}>
-                        <td colSpan={6} className="py-2 px-2">
+                        <td colSpan={7} className="py-2 px-2">
                           <form
                             onSubmit={(e) => {
                               e.preventDefault()
@@ -255,15 +284,17 @@ export default function PagosSection({
                   }
 
                   return (
-                    <>
+                    <Fragment key={pago.id}>
                       <tr
-                        key={pago.id}
                         className={`border-b border-gray-50 group ${tieneAtraso ? 'bg-orange-50' : 'hover:bg-gray-50'}`}
                       >
                         <td className="py-2 px-2 font-mono text-gray-700">{pago.periodo}</td>
                         <td className="py-2 px-2 text-right font-medium text-gray-800">{montoBase(pago)}</td>
-                        <td className={`py-2 px-2 text-right font-medium ${tieneAtraso && filaMulta > 0 ? 'text-orange-600' : 'text-gray-300'}`}>
-                          {deudaTotal}
+                        <td className="py-2 px-2 text-right text-sm text-gray-700">
+                          {pago.valor_clp ? formatCLP(pago.valor_clp) : '—'}
+                        </td>
+                        <td className={`py-2 px-2 text-right text-sm ${saldoColor}`}>
+                          {saldoDisplay}
                         </td>
                         <td className="py-2 px-2 text-center">
                           <div className="flex items-center justify-center gap-2">
@@ -295,13 +326,13 @@ export default function PagosSection({
                       </tr>
                       {tieneAtraso && (
                         <tr className={tieneAtraso ? 'bg-orange-50' : ''}>
-                          <td colSpan={6} className="px-2 pb-1.5 text-xs text-orange-600">
+                          <td colSpan={7} className="px-2 pb-1.5 text-xs text-orange-600">
                             {filaDiasAtraso} día{filaDiasAtraso !== 1 ? 's' : ''} de atraso
                             {filaMulta > 0 && ` — multa: ${multaMoneda === 'CLP' ? `$${filaMulta.toLocaleString('es-CL')} CLP` : `${filaMulta} ${multaMoneda ?? ''}`}`}
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   )
                 })}
               </tbody>
