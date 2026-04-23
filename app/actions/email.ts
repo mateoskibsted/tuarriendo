@@ -413,6 +413,24 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
 
   if (messageList.length === 0) return { sugerencias: [] }
 
+  // Fetch already-registered email_origen for all tenants to avoid re-showing confirmed payments
+  const emailsYaRegistrados = new Set<string>()
+  {
+    const allContratoIdsFinal = tenantsSinPagar.map(t => t.contratoId).filter(Boolean) as string[]
+    const allPropiedadIdsFinal = tenantsSinPagar.map(t => t.propiedadId).filter(Boolean) as string[]
+    const [byContrato, byPropiedad] = await Promise.all([
+      allContratoIdsFinal.length > 0
+        ? admin.from('pagos').select('email_origen').in('contrato_id', allContratoIdsFinal).not('email_origen', 'is', null)
+        : Promise.resolve({ data: [] }),
+      allPropiedadIdsFinal.length > 0
+        ? admin.from('pagos').select('email_origen').in('propiedad_id', allPropiedadIdsFinal).not('email_origen', 'is', null)
+        : Promise.resolve({ data: [] }),
+    ])
+    for (const p of [...(byContrato.data ?? []), ...(byPropiedad.data ?? [])]) {
+      if (p.email_origen) emailsYaRegistrados.add(p.email_origen as string)
+    }
+  }
+
   // Fetch and parse each email
   const parsedEmails: Array<{
     idx: number
@@ -424,6 +442,9 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
 
   for (const msg of messageList) {
     if (!msg.id) continue
+    // Skip emails already registered as payments
+    const gmailLink = `https://mail.google.com/mail/u/0/#all/${msg.id}`
+    if (emailsYaRegistrados.has(gmailLink)) continue
     try {
       const res = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'full' })
       const msgData = res.data
