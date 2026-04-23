@@ -22,6 +22,14 @@ export default async function EmailPage({
 
   const typedConnection = connection as EmailConnection | null
 
+  // Detect proactively if the token looks expired (no refresh_token and expires_at in the past)
+  const tokenExpired = !!(
+    typedConnection &&
+    !typedConnection.refresh_token &&
+    typedConnection.expires_at &&
+    new Date(typedConnection.expires_at) < new Date()
+  )
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
@@ -43,7 +51,7 @@ export default async function EmailPage({
       )}
       {params.success === 'connected' && (
         <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-green-700 text-sm">
-          Gmail conectado correctamente. Ya puedes escanear tus correos.
+          Gmail reconectado correctamente. Ya puedes escanear tus correos.
         </div>
       )}
 
@@ -56,6 +64,7 @@ export default async function EmailPage({
       <EmailPageClient
         connected={!!typedConnection}
         emailAddress={typedConnection?.email}
+        tokenExpired={tokenExpired}
       />
     </div>
   )

@@ -84,6 +84,8 @@ export interface EmailConnection {
   provider: 'gmail'
   email: string
   connected_at: string
+  refresh_token?: string | null
+  expires_at?: string | null
 }
 
 export interface PeriodoOpcion {

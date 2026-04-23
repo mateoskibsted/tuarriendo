@@ -234,7 +234,7 @@ export async function desconectarEmail() {
   return { success: true }
 }
 
-export async function escanearEmails(): Promise<{ error?: string; sugerencias?: PagoSugerido[] }> {
+export async function escanearEmails(): Promise<{ error?: string; sugerencias?: PagoSugerido[]; needsReconnect?: boolean }> {
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }
 
@@ -380,8 +380,13 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
   try {
     const res = await gmail.users.messages.list({ userId: 'me', q: query, maxResults: 30 })
     messageList = res.data.messages ?? []
-  } catch {
-    return { error: 'Error al leer correos. Reconecta tu cuenta de Gmail.' }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    const isAuthError = msg.includes('invalid_grant') || msg.includes('Token has been expired') || msg.includes('401') || msg.includes('unauthorized') || msg.includes('invalid_token')
+    if (isAuthError) {
+      return { error: 'Tu conexión con Gmail expiró. Debes reconectar tu cuenta.', needsReconnect: true }
+    }
+    return { error: 'Error al leer correos. Reconecta tu cuenta de Gmail.', needsReconnect: false }
   }
 
   if (messageList.length === 0) return { sugerencias: [] }

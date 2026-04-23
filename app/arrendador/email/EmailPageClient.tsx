@@ -24,13 +24,16 @@ function formatCLPLocal(n: number) {
 export default function EmailPageClient({
   connected,
   emailAddress,
+  tokenExpired,
 }: {
   connected: boolean
   emailAddress?: string
+  tokenExpired?: boolean
 }) {
   const [scanning, setScanning] = useState(false)
   const [sugerencias, setSugerencias] = useState<PagoSugerido[] | null>(null)
   const [scanError, setScanError] = useState('')
+  const [needsReconnect, setNeedsReconnect] = useState(tokenExpired ?? false)
   const [confirmed, setConfirmed] = useState<Set<string>>(new Set())
   const [confirming, setConfirming] = useState<string | null>(null)
   const [disconnecting, setDisconnecting] = useState(false)
@@ -43,7 +46,9 @@ export default function EmailPageClient({
     setScanning(false)
     if (result.error) {
       setScanError(result.error)
+      if ((result as { needsReconnect?: boolean }).needsReconnect) setNeedsReconnect(true)
     } else {
+      setNeedsReconnect(false)
       setSugerencias(result.sugerencias ?? [])
     }
   }
@@ -94,25 +99,32 @@ export default function EmailPageClient({
   return (
     <div className="space-y-6">
       {/* Connected account */}
-      <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center justify-between">
+      <div className={`bg-white rounded-xl border p-4 flex items-center justify-between ${needsReconnect ? 'border-amber-300' : 'border-gray-200'}`}>
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-            <svg className="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 24 24">
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${needsReconnect ? 'bg-amber-100' : 'bg-red-100'}`}>
+            <svg className={`w-5 h-5 ${needsReconnect ? 'text-amber-500' : 'text-red-500'}`} fill="currentColor" viewBox="0 0 24 24">
               <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-2 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
             </svg>
           </div>
           <div>
             <p className="font-medium text-gray-900">{emailAddress}</p>
-            <p className="text-xs text-green-600">Gmail conectado</p>
+            <p className={`text-xs ${needsReconnect ? 'text-amber-600' : 'text-green-600'}`}>
+              {needsReconnect ? 'Sesión expirada — requiere reconexión' : 'Gmail conectado'}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            onClick={handleScan}
-            disabled={scanning}
-          >
-            {scanning ? 'Escaneando...' : 'Escanear correos'}
-          </Button>
+          {needsReconnect ? (
+            <a href="/api/auth/gmail/init">
+              <Button className="bg-amber-600 hover:bg-amber-700 text-white">
+                Reconectar Gmail
+              </Button>
+            </a>
+          ) : (
+            <Button onClick={handleScan} disabled={scanning}>
+              {scanning ? 'Escaneando...' : 'Escanear correos'}
+            </Button>
+          )}
           <Button
             variant="secondary"
             onClick={handleDesconectar}
@@ -123,7 +135,23 @@ export default function EmailPageClient({
         </div>
       </div>
 
-      {scanError && (
+      {needsReconnect && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="flex-1">
+            <p className="font-semibold text-amber-900 text-sm">Tu conexión con Gmail expiró</p>
+            <p className="text-amber-700 text-sm mt-0.5">
+              Google desconectó la sesión por inactividad o cambio de permisos. Reconecta para seguir detectando pagos automáticamente. No perderás tu configuración.
+            </p>
+          </div>
+          <a href="/api/auth/gmail/init" className="shrink-0">
+            <Button className="bg-amber-600 hover:bg-amber-700 text-white w-full sm:w-auto">
+              Reconectar ahora
+            </Button>
+          </a>
+        </div>
+      )}
+
+      {scanError && !needsReconnect && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">
           {scanError}
         </div>
