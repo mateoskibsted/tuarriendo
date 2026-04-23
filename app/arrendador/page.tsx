@@ -15,7 +15,8 @@ export default async function ArrendadorDashboard() {
   const { data: { user } } = await supabase.auth.getUser()
   const admin = createAdminClient()
 
-  const mesActual = new Date().toISOString().slice(0, 7)
+  const hoyChile = todayInChile()
+  const mesActual = `${hoyChile.getFullYear()}-${String(hoyChile.getMonth() + 1).padStart(2, '0')}`
 
   const { data: propiedades } = await admin
     .from('propiedades')

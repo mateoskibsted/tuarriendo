@@ -320,21 +320,44 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
 
   if (tenants.length === 0) return { sugerencias: [] }
 
-  // Exclude tenants that already have a confirmed payment this month
-  const periodoActual = new Date().toISOString().slice(0, 7)
-  const { data: pagosYaRegistrados } = await admin
-    .from('pagos')
-    .select('contrato_id, propiedad_id')
-    .eq('periodo', periodoActual)
-    .in('estado', ['pagado', 'atrasado', 'incompleto'])
+  const hoy = todayInChile()
+  const periodoActual = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`
+  const periodoSiguiente = periodoSiguienteDe(periodoActual)
 
-  const contratosPagados = new Set((pagosYaRegistrados ?? []).map((p: { contrato_id: string | null }) => p.contrato_id).filter(Boolean))
-  const propiedadesPagadas = new Set((pagosYaRegistrados ?? []).map((p: { propiedad_id: string | null }) => p.propiedad_id).filter(Boolean))
+  // Fetch confirmed payments for current AND next period
+  const allContratoIds2 = tenants.map(t => t.contratoId).filter(Boolean) as string[]
+  const allPropiedadIds2 = tenants.map(t => t.propiedadId).filter(Boolean) as string[]
 
-  const tenantsSinPagar = tenants.filter(t =>
-    !(t.contratoId && contratosPagados.has(t.contratoId)) &&
-    !(t.propiedadId && propiedadesPagadas.has(t.propiedadId))
-  )
+  const fetchPagos = async (periodo: string) => {
+    const [byContrato, byPropiedad] = await Promise.all([
+      allContratoIds2.length > 0
+        ? admin.from('pagos').select('contrato_id').eq('periodo', periodo)
+            .in('estado', ['pagado', 'atrasado', 'incompleto']).in('contrato_id', allContratoIds2)
+        : Promise.resolve({ data: [] }),
+      allPropiedadIds2.length > 0
+        ? admin.from('pagos').select('propiedad_id').eq('periodo', periodo)
+            .in('estado', ['pagado', 'atrasado', 'incompleto']).in('propiedad_id', allPropiedadIds2)
+        : Promise.resolve({ data: [] }),
+    ])
+    return {
+      contratos: new Set((byContrato.data ?? []).map((p: { contrato_id: string | null }) => p.contrato_id).filter(Boolean) as string[]),
+      propiedades: new Set((byPropiedad.data ?? []).map((p: { propiedad_id: string | null }) => p.propiedad_id).filter(Boolean) as string[]),
+    }
+  }
+
+  const [pagadosActual, pagadosSiguiente] = await Promise.all([
+    fetchPagos(periodoActual),
+    fetchPagos(periodoSiguiente),
+  ])
+
+  // Exclude tenants only if BOTH current AND next period are already paid
+  const tenantsSinPagar = tenants.filter(t => {
+    const currentPaid = (t.contratoId && pagadosActual.contratos.has(t.contratoId)) ||
+                        (t.propiedadId && pagadosActual.propiedades.has(t.propiedadId))
+    const nextPaid = (t.contratoId && pagadosSiguiente.contratos.has(t.contratoId)) ||
+                     (t.propiedadId && pagadosSiguiente.propiedades.has(t.propiedadId))
+    return !currentPaid || !nextPaid
+  })
 
   if (tenantsSinPagar.length === 0) return { sugerencias: [] }
 
@@ -343,7 +366,6 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
 
   // Calculate total expected (base + fine if overdue) for each tenant
   const [year, month] = periodoActual.split('-').map(Number)
-  const hoy = todayInChile()
 
   const tenantsConCLP = tenantsSinPagar.map(t => {
     const monto_clp = t.moneda === 'UF' ? Math.round(t.monto * ufValue) : t.monto
