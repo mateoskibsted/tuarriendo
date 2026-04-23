@@ -485,18 +485,20 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
 
     let periodos_disponibles: import('@/lib/types').PeriodoOpcion[] | undefined
 
-    if (prevUnpaid && tenant.diaPago) {
+    if (tenant.diaPago) {
       const opciones: import('@/lib/types').PeriodoOpcion[] = []
 
-      // Option 1: previous period (late payment)
-      const [py, pm] = periodoAnterior.split('-').map(Number)
-      const vencPrev = new Date(py, pm - 1, tenant.diaPago)
-      const diasPrev = Math.max(0, Math.floor((emailFecha.getTime() - vencPrev.getTime()) / 86400000))
-      opciones.push({
-        periodo: periodoAnterior,
-        label: `${periodoMesNombre(periodoAnterior)} — pago atrasado (${diasPrev} días)`,
-        dias_atraso: diasPrev,
-      })
+      // Option 1: previous period (if unpaid)
+      if (prevUnpaid) {
+        const [py, pm] = periodoAnterior.split('-').map(Number)
+        const vencPrev = new Date(py, pm - 1, tenant.diaPago)
+        const diasPrev = Math.max(0, Math.floor((emailFecha.getTime() - vencPrev.getTime()) / 86400000))
+        opciones.push({
+          periodo: periodoAnterior,
+          label: `${periodoMesNombre(periodoAnterior)} — pago atrasado (${diasPrev} días)`,
+          dias_atraso: diasPrev,
+        })
+      }
 
       // Option 2: current period
       const [cy, cm] = periodoActual.split('-').map(Number)
@@ -509,6 +511,19 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
           : `${periodoMesNombre(periodoActual)} — a tiempo`,
         dias_atraso: diasActual,
       })
+
+      // Option 3: next period (if payment is after current due date — could be advance)
+      if (diasActual > 0) {
+        const pSiguiente = periodoSiguienteDe(periodoActual)
+        const [ny, nm] = pSiguiente.split('-').map(Number)
+        const vencSig = new Date(ny, nm - 1, tenant.diaPago)
+        const diasAntes = Math.max(0, Math.floor((vencSig.getTime() - emailFecha.getTime()) / 86400000))
+        opciones.push({
+          periodo: pSiguiente,
+          label: `${periodoMesNombre(pSiguiente)} — pago adelantado (${diasAntes} días antes)`,
+          dias_atraso: 0,
+        })
+      }
 
       if (opciones.length > 1) periodos_disponibles = opciones
     }
@@ -550,6 +565,12 @@ function periodoAnteriorDe(periodo: string): string {
   return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`
 }
 
+function periodoSiguienteDe(periodo: string): string {
+  const [y, m] = periodo.split('-').map(Number)
+  const next = new Date(y, m, 1)
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`
+}
+
 export async function confirmarPagoEmail(
   contratoId: string,
   montoCLP: number,
@@ -582,15 +603,15 @@ export async function confirmarPagoEmail(
   const valorBase = propiedadData?.valor_uf ?? 0
   const montoBaseCLP = moneda === 'CLP' ? valorBase : Math.round(valorBase * ufValue)
 
-  // Atraso calculation
+  // Atraso: compare the actual payment date vs due date (not today)
+  const fechaPago = emailFecha ? new Date(emailFecha) : new Date()
   let diasAtraso = 0
   let multaTotal = 0
   if (diaPago) {
     const [year, month] = periodo.split('-').map(Number)
     const fechaVencimiento = new Date(year, month - 1, diaPago)
-    const hoy = todayInChile()
-    if (hoy > fechaVencimiento) {
-      diasAtraso = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / 86400000)
+    if (fechaPago > fechaVencimiento) {
+      diasAtraso = Math.floor((fechaPago.getTime() - fechaVencimiento.getTime()) / 86400000)
       multaTotal = propiedadData?.multa_monto ? diasAtraso * propiedadData.multa_monto : 0
     }
   }
@@ -606,12 +627,8 @@ export async function confirmarPagoEmail(
   }
   const notas = notasParts.join('. ')
 
-  // Estado:
-  // - 'pagado': a tiempo y monto completo
-  // - 'atrasado': tarde pero monto cubre base+multa (verde en UI)
-  // - 'incompleto': monto recibido no cubre la deuda total
   const montoTotalEsperado = montoBaseCLP + multaTotal
-  const esPagoCompleto = montoCLP >= montoTotalEsperado - 100  // tolerancia $100
+  const esPagoCompleto = montoCLP >= montoTotalEsperado - 100
   let estado: string
   if (diasAtraso > 0) {
     estado = esPagoCompleto ? 'atrasado' : 'incompleto'
@@ -619,7 +636,7 @@ export async function confirmarPagoEmail(
     estado = esPagoCompleto ? 'pagado' : 'incompleto'
   }
 
-  const fechaPago = emailFecha ? new Date(emailFecha).toISOString() : new Date().toISOString()
+  const fechaPagoISO = fechaPago.toISOString()
 
   // Un email = un solo pago. Bloquear solo si está registrado en un contrato DIFERENTE.
   if (emailId) {
@@ -638,7 +655,7 @@ export async function confirmarPagoEmail(
     .maybeSingle()
 
   // UF value on the exact payment date for historical accuracy
-  const ufValorDia = moneda !== 'CLP' ? await getUFValueForDate(fechaPago) : null
+  const ufValorDia = moneda !== 'CLP' ? await getUFValueForDate(fechaPagoISO) : null
 
   const payload = {
     contrato_id: contratoId,
@@ -647,7 +664,7 @@ export async function confirmarPagoEmail(
     valor_clp: montoCLP,
     uf_valor_dia: ufValorDia,
     estado,
-    fecha_pago: fechaPago,
+    fecha_pago: fechaPagoISO,
     notas,
     email_origen: emailId ? `https://mail.google.com/mail/u/0/#all/${emailId}` : null,
   }
@@ -703,15 +720,15 @@ export async function confirmarPagoEmailInformal(
   const valorBase = propiedad.valor_uf ?? 0
   const montoBaseCLP = moneda === 'CLP' ? valorBase : Math.round(valorBase * ufValue)
 
-  // Atraso calculation
+  // Atraso: compare the actual payment date vs due date (not today)
+  const fechaPago = emailFecha ? new Date(emailFecha) : new Date()
   let diasAtraso = 0
   let multaTotal = 0
   if (propiedad.dia_vencimiento) {
     const [year, month] = periodo.split('-').map(Number)
     const fechaVencimiento = new Date(year, month - 1, propiedad.dia_vencimiento)
-    const hoy = todayInChile()
-    if (hoy > fechaVencimiento) {
-      diasAtraso = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / 86400000)
+    if (fechaPago > fechaVencimiento) {
+      diasAtraso = Math.floor((fechaPago.getTime() - fechaVencimiento.getTime()) / 86400000)
       multaTotal = propiedad.multa_monto ? diasAtraso * propiedad.multa_monto : 0
     }
   }
@@ -743,7 +760,7 @@ export async function confirmarPagoEmailInformal(
     .eq('periodo', periodo)
     .maybeSingle()
 
-  const fechaPago = emailFecha ? new Date(emailFecha).toISOString() : new Date().toISOString()
+  const fechaPagoISO = fechaPago.toISOString()
 
   // Un email = un solo pago. Bloquear solo si está registrado en una propiedad DIFERENTE.
   if (emailId) {
@@ -754,7 +771,7 @@ export async function confirmarPagoEmailInformal(
     }
   }
 
-  const ufValorDia = moneda !== 'CLP' ? await getUFValueForDate(fechaPago) : null
+  const ufValorDia = moneda !== 'CLP' ? await getUFValueForDate(fechaPagoISO) : null
 
   const payload = {
     propiedad_id: propiedadId,
@@ -764,7 +781,7 @@ export async function confirmarPagoEmailInformal(
     valor_clp: montoCLP,
     uf_valor_dia: ufValorDia,
     estado,
-    fecha_pago: fechaPago,
+    fecha_pago: fechaPagoISO,
     notas,
     email_origen: emailId ? `https://mail.google.com/mail/u/0/#all/${emailId}` : null,
   }
@@ -931,6 +948,19 @@ export async function obtenerPeriodosDisponibles(
       : `${periodoMesNombre(periodoActual)} — a tiempo`,
     dias_atraso: diasActual,
   })
+
+  // If payment is after current due date, also offer next period (advance payment)
+  if (diasActual > 0) {
+    const pSiguiente = periodoSiguienteDe(periodoActual)
+    const [ny, nm] = pSiguiente.split('-').map(Number)
+    const vencSig = new Date(ny, nm - 1, diaPago)
+    const diasAntes = Math.max(0, Math.floor((vencSig.getTime() - fechaPago.getTime()) / 86400000))
+    opciones.push({
+      periodo: pSiguiente,
+      label: `${periodoMesNombre(pSiguiente)} — pago adelantado (${diasAntes} días antes)`,
+      dias_atraso: 0,
+    })
+  }
 
   return { opciones }
 }
