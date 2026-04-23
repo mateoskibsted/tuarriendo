@@ -469,10 +469,11 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
   )
 
   // Build final suggestions from matches
-  const sugerencias: PagoSugerido[] = matches.map(match => {
+  const sugerencias: PagoSugerido[] = []
+  for (const match of matches) {
     const email = parsedEmails.find(e => e.idx === match.emailIdx)
     const tenant = tenantsConCLP.find(t => t.idx === match.tenantIdx)
-    if (!email || !tenant) return null
+    if (!email || !tenant) continue
 
     const emailFecha = new Date(email.fecha)
 
@@ -484,6 +485,7 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
         : false
 
     let periodos_disponibles: import('@/lib/types').PeriodoOpcion[] | undefined
+    let periodoElegido = periodoActual
 
     if (tenant.diaPago) {
       const opciones: import('@/lib/types').PeriodoOpcion[] = []
@@ -525,10 +527,23 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
         })
       }
 
-      if (opciones.length > 1) periodos_disponibles = opciones
+      if (opciones.length > 1) {
+        // Check if there's an established payment pattern to skip the selector
+        const patron = await getPatronPeriodo(admin, tenant.contratoId, tenant.propiedadId, tenant.diaPago)
+        if (patron === 'actual') {
+          // Known late payer → assign to current period automatically
+          periodoElegido = periodoActual
+        } else if (patron === 'siguiente') {
+          // Known advance payer → assign to next period automatically
+          periodoElegido = periodoSiguienteDe(periodoActual)
+        } else {
+          // No pattern yet — show selector so landlord can teach the system
+          periodos_disponibles = opciones
+        }
+      }
     }
 
-    return {
+    sugerencias.push({
       emailId: email.emailId,
       fecha: email.fecha,
       asunto: email.asunto,
@@ -540,10 +555,10 @@ export async function escanearEmails(): Promise<{ error?: string; sugerencias?: 
       arrendatario_nombre: tenant.nombre,
       propiedad_nombre: tenant.propiedadNombre,
       confianza: match.confianza,
-      periodo: periodoActual,
+      periodo: periodoElegido,
       periodos_disponibles,
-    }
-  }).filter(Boolean) as PagoSugerido[]
+    })
+  }
 
   // Sort: alta first
   sugerencias.sort((a, b) => (a.confianza === 'alta' ? -1 : 1))
@@ -569,6 +584,48 @@ function periodoSiguienteDe(periodo: string): string {
   const [y, m] = periodo.split('-').map(Number)
   const next = new Date(y, m, 1)
   return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`
+}
+
+/**
+ * Reads the last confirmed payment and determines the tenant's payment pattern:
+ * - 'actual': tenant pays late (after due date) but it's for the current period
+ * - 'siguiente': tenant pays early (before due date of next period — advance billing)
+ * - null: no pattern established yet (on-time payments or no history)
+ */
+async function getPatronPeriodo(
+  admin: ReturnType<typeof createAdminClient>,
+  contratoId: string | undefined | null,
+  propiedadId: string | undefined | null,
+  diaPago: number,
+): Promise<'actual' | 'siguiente' | null> {
+  if (!contratoId && !propiedadId) return null
+
+  const q = admin.from('pagos')
+    .select('periodo, fecha_pago')
+    .in('estado', ['pagado', 'atrasado'])
+    .order('fecha_pago', { ascending: false })
+    .limit(1)
+
+  const { data } = contratoId
+    ? await q.eq('contrato_id', contratoId)
+    : await q.eq('propiedad_id', propiedadId!)
+
+  const last = data?.[0]
+  if (!last?.fecha_pago || !last?.periodo) return null
+
+  const [py, pm] = last.periodo.split('-').map(Number)
+  const dueDate = new Date(py, pm - 1, diaPago)
+  const payDate = new Date(last.fecha_pago)
+
+  // Payment arrived after due date → late payment for current period
+  if (payDate > dueDate) return 'actual'
+
+  // Payment arrived before the period's month → advance payment for next period
+  if (payDate.getFullYear() < py || (payDate.getFullYear() === py && payDate.getMonth() + 1 < pm)) {
+    return 'siguiente'
+  }
+
+  return null // on-time, no pattern to learn from
 }
 
 export async function confirmarPagoEmail(
@@ -960,6 +1017,20 @@ export async function obtenerPeriodosDisponibles(
       label: `${periodoMesNombre(pSiguiente)} — pago adelantado (${diasAntes} días antes)`,
       dias_atraso: 0,
     })
+  }
+
+  // If there are multiple options, check if there's an established pattern to skip the selector
+  if (opciones.length > 1) {
+    const patron = await getPatronPeriodo(admin, contratoId, propiedadId, diaPago)
+    if (patron === 'actual') {
+      const opcionActual = opciones.find(o => o.periodo === periodoActual)
+      return { opciones: opcionActual ? [opcionActual] : opciones }
+    }
+    if (patron === 'siguiente') {
+      const pSig = periodoSiguienteDe(periodoActual)
+      const opcionSig = opciones.find(o => o.periodo === pSig)
+      return { opciones: opcionSig ? [opcionSig] : opciones }
+    }
   }
 
   return { opciones }
