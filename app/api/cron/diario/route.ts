@@ -3,30 +3,14 @@ import { NextRequest, NextResponse } from 'next/server'
 function autenticado(req: NextRequest) {
   const secret = process.env.CRON_SECRET
   if (!secret) return true
-  const auth = req.headers.get('authorization')
-  const qs = req.nextUrl.searchParams.get('secret')
-  return auth === `Bearer ${secret}` || qs === secret
+  return req.headers.get('authorization') === `Bearer ${secret}` || req.nextUrl.searchParams.get('secret') === secret
 }
 
-// Single daily cron that runs both notifications and email scanner.
-// Hobby plan only allows one cron per day — this consolidates them.
+// Legacy entry point — delegates to manana cron
 export async function GET(req: NextRequest) {
   if (!autenticado(req)) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
-
   const base = req.nextUrl.origin
-
-  const [notifRes, escanearRes] = await Promise.allSettled([
-    fetch(`${base}/api/cron/notificaciones`, {
-      headers: { authorization: `Bearer ${process.env.CRON_SECRET ?? ''}` },
-    }).then(r => r.json()),
-    fetch(`${base}/api/cron/escanear`, {
-      headers: { authorization: `Bearer ${process.env.CRON_SECRET ?? ''}` },
-    }).then(r => r.json()),
-  ])
-
-  return NextResponse.json({
-    ok: true,
-    notificaciones: notifRes.status === 'fulfilled' ? notifRes.value : { error: String(notifRes.reason) },
-    escanear: escanearRes.status === 'fulfilled' ? escanearRes.value : { error: String(escanearRes.reason) },
-  })
+  const headers = { authorization: `Bearer ${process.env.CRON_SECRET ?? ''}` }
+  const notifRes = await fetch(`${base}/api/cron/notificaciones?turno=manana`, { headers }).then(r => r.json()).catch(e => ({ error: String(e) }))
+  return NextResponse.json({ ok: true, notificaciones: notifRes })
 }
