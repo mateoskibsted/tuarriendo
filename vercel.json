@@ -1,8 +1,12 @@
 {
   "crons": [
     {
-      "path": "/api/cron/diario",
-      "schedule": "0 12 * * *"
+      "path": "/api/cron/manana",
+      "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/noche",
+      "schedule": "0 1 * * *"
     }
   ]
 }

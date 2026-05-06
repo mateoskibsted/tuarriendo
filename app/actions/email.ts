@@ -7,6 +7,7 @@ import { revalidatePath } from 'next/cache'
 import { extractTextFromPayload, decodeBase64Url } from '@/lib/utils/email-parser'
 import { getUFValue, getUFValueForDate } from '@/lib/utils/uf'
 import { todayInChile } from '@/lib/utils/date'
+import { enviarWhatsApp } from '@/lib/utils/twilio'
 import type { PagoSugerido } from '@/lib/types'
 
 async function getAuthContext() {
@@ -683,7 +684,7 @@ export async function confirmarPagoEmail(
 
   const { data: contrato } = await admin
     .from('contratos')
-    .select('id, propiedad_id, dia_pago, valor_uf, propiedades(arrendador_id, valor_uf, moneda, multa_monto, multa_moneda)')
+    .select('id, propiedad_id, dia_pago, valor_uf, propiedades(arrendador_id, nombre, valor_uf, moneda, multa_monto, multa_moneda), profiles!contratos_arrendatario_id_fkey(nombre, telefono)')
     .eq('id', contratoId)
     .single()
 
@@ -792,6 +793,23 @@ export async function confirmarPagoEmail(
   if (contratoProp?.propiedad_id) {
     revalidatePath(`/arrendador/propiedades/${contratoProp.propiedad_id}`)
   }
+
+  // Send WhatsApp confirmation to tenant
+  const telefono = (contrato as unknown as { profiles?: { nombre?: string; telefono?: string | null } }).profiles?.telefono
+  const propNombre = (contrato as unknown as { propiedades?: { nombre?: string } }).propiedades?.nombre ?? ''
+  const nombre = (contrato as unknown as { profiles?: { nombre?: string } }).profiles?.nombre?.split(' ')[0] ?? ''
+  if (telefono) {
+    const formatCLP = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(n)
+    let msgConfirmacion: string
+    if (estado === 'pagado' || estado === 'atrasado') {
+      msgConfirmacion = `✅ Hola ${nombre}! Tu pago de *${formatCLP(montoCLP)} CLP* para *${propNombre}* fue registrado correctamente. ¡Gracias!`
+    } else {
+      const faltante = montoBaseCLP - montoCLP
+      msgConfirmacion = `⚠️ Hola ${nombre}! Registramos un pago parcial de *${formatCLP(montoCLP)} CLP* para *${propNombre}*.\n\nAún faltan *${formatCLP(faltante)} CLP* para cubrir el arriendo. Por favor completa el pago.`
+    }
+    await enviarWhatsApp(telefono, msgConfirmacion)
+  }
+
   return { success: true }
 }
 
@@ -807,7 +825,7 @@ export async function confirmarPagoEmailInformal(
 
   const { data: propiedad } = await admin
     .from('propiedades')
-    .select('id, valor_uf, moneda, dia_vencimiento, multa_monto, multa_moneda')
+    .select('id, nombre, valor_uf, moneda, dia_vencimiento, multa_monto, multa_moneda, arrendatario_informal_nombre, arrendatario_informal_celular')
     .eq('id', propiedadId)
     .eq('arrendador_id', user.id)
     .single()
@@ -899,6 +917,22 @@ export async function confirmarPagoEmailInformal(
 
   revalidatePath('/arrendador')
   revalidatePath(`/arrendador/propiedades/${propiedadId}`)
+
+  // Send WhatsApp confirmation to informal tenant
+  const telefono = propiedad.arrendatario_informal_celular as string | null | undefined
+  const nombreInformal = (propiedad.arrendatario_informal_nombre as string | null | undefined)?.split(' ')[0] ?? ''
+  if (telefono) {
+    const formatCLP = (n: number) => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(n)
+    let msgConfirmacion: string
+    if (estado === 'pagado' || estado === 'atrasado') {
+      msgConfirmacion = `✅ Hola ${nombreInformal}! Tu pago de *${formatCLP(montoCLP)} CLP* para *${propiedad.nombre}* fue registrado correctamente. ¡Gracias!`
+    } else {
+      const faltante = montoBaseCLP - montoCLP
+      msgConfirmacion = `⚠️ Hola ${nombreInformal}! Registramos un pago parcial de *${formatCLP(montoCLP)} CLP* para *${propiedad.nombre}*.\n\nAún faltan *${formatCLP(faltante)} CLP* para cubrir el arriendo. Por favor completa el pago.`
+    }
+    await enviarWhatsApp(telefono, msgConfirmacion)
+  }
+
   return { success: true }
 }
 
