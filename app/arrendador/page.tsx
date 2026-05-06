@@ -4,8 +4,8 @@ import Link from 'next/link'
 import Badge from '@/components/ui/Badge'
 import { formatUF, formatCLP, getUFValue } from '@/lib/utils/uf'
 import { todayInChile } from '@/lib/utils/date'
-import PagosDetectadosAuto from './PagosDetectadosAuto'
-import PagosDetectadosCron from './PagosDetectadosCron'
+import PagosPendientesWhatsApp from './PagosPendientesWhatsApp'
+import TelefonoArrendadorForm from './TelefonoArrendadorForm'
 import type { Propiedad, Contrato } from '@/lib/types'
 
 const MAX_PROPIEDADES = 10
@@ -18,12 +18,10 @@ export default async function ArrendadorDashboard() {
   const hoyChile = todayInChile()
   const mesActual = `${hoyChile.getFullYear()}-${String(hoyChile.getMonth() + 1).padStart(2, '0')}`
 
-  const { data: propiedades } = await admin
-    .from('propiedades')
-    .select('*')
-    .eq('arrendador_id', user!.id)
-    .eq('activa', true)
-    .order('created_at', { ascending: false })
+  const [{ data: propiedades }, { data: arrendadorProfile }] = await Promise.all([
+    admin.from('propiedades').select('*').eq('arrendador_id', user!.id).eq('activa', true).order('created_at', { ascending: false }),
+    admin.from('profiles').select('telefono').eq('id', user!.id).single(),
+  ])
 
   const propiedadIds = (propiedades ?? []).map((p: Propiedad) => p.id)
 
@@ -38,11 +36,7 @@ export default async function ArrendadorDashboard() {
   const contratoIds = (contratos ?? []).map((c: Contrato) => c.id)
 
   const { data: pagosFormalesEsteMes } = contratoIds.length > 0
-    ? await admin
-        .from('pagos')
-        .select('contrato_id, estado, fecha_pago')
-        .in('contrato_id', contratoIds)
-        .eq('periodo', mesActual)
+    ? await admin.from('pagos').select('contrato_id, estado, fecha_pago').in('contrato_id', contratoIds).eq('periodo', mesActual)
     : { data: [] }
 
   type PagoResumen = { contrato_id?: string | null; propiedad_id?: string | null; estado: string; fecha_pago?: string | null }
@@ -58,11 +52,7 @@ export default async function ArrendadorDashboard() {
     .map((p: Propiedad) => p.id)
 
   const { data: pagosInformalesEsteMes } = propiedadesInformalesIds.length > 0
-    ? await admin
-        .from('pagos')
-        .select('propiedad_id, estado, fecha_pago')
-        .in('propiedad_id', propiedadesInformalesIds)
-        .eq('periodo', mesActual)
+    ? await admin.from('pagos').select('propiedad_id, estado, fecha_pago').in('propiedad_id', propiedadesInformalesIds).eq('periodo', mesActual)
     : { data: [] }
 
   const pagosInformalMap = new Map<string, PagoResumen>(
@@ -91,13 +81,6 @@ export default async function ArrendadorDashboard() {
 
   const pagadosEsteMesFormal = (pagosFormalesEsteMes ?? []).filter((p: PagoResumen) => p.estado === 'pagado' || p.estado === 'atrasado').length
   const pagadosEsteMesInformal = (pagosInformalesEsteMes ?? []).filter((p: PagoResumen) => p.estado === 'pagado' || p.estado === 'atrasado').length
-
-  const { data: emailConnection } = await admin
-    .from('email_connections')
-    .select('id')
-    .eq('arrendador_id', user!.id)
-    .single()
-
   const ufHoy = await getUFValue()
 
   const totalPropiedades = propiedades?.length ?? 0
@@ -112,6 +95,8 @@ export default async function ArrendadorDashboard() {
     return [nombres[m - 1], y]
   })()
 
+  const arrendadorTelefono = (arrendadorProfile as unknown as { telefono?: string | null } | null)?.telefono ?? null
+
   return (
     <div className="space-y-8">
 
@@ -123,88 +108,47 @@ export default async function ArrendadorDashboard() {
 
       {/* Stats row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          label="Propiedades"
-          value={`${totalPropiedades}`}
-          sub={`de ${MAX_PROPIEDADES} disponibles`}
-          color="blue"
-        />
-        <StatCard
-          label="Con arrendatario"
-          value={`${propiedadesConInquilino}`}
-          sub={`de ${totalPropiedades} propiedades`}
-          color="gray"
-        />
-        <StatCard
-          label="Pagaron este mes"
-          value={`${pagadosEsteMes}`}
-          sub={propiedadesConInquilino > 0 ? `de ${propiedadesConInquilino} arrendatarios` : 'sin arrendatarios'}
-          color="green"
-        />
-        <StatCard
-          label="Sin pago"
-          value={`${sinPagoEsteMes}`}
-          sub={sinPagoEsteMes > 0 ? 'requieren atención' : 'todos al día'}
-          color={sinPagoEsteMes > 0 ? 'red' : 'gray'}
-        />
+        <StatCard label="Propiedades" value={`${totalPropiedades}`} sub={`de ${MAX_PROPIEDADES} disponibles`} color="blue" />
+        <StatCard label="Con arrendatario" value={`${propiedadesConInquilino}`} sub={`de ${totalPropiedades} propiedades`} color="gray" />
+        <StatCard label="Pagaron este mes" value={`${pagadosEsteMes}`} sub={propiedadesConInquilino > 0 ? `de ${propiedadesConInquilino} arrendatarios` : 'sin arrendatarios'} color="green" />
+        <StatCard label="Sin pago" value={`${sinPagoEsteMes}`} sub={sinPagoEsteMes > 0 ? 'requieren atención' : 'todos al día'} color={sinPagoEsteMes > 0 ? 'red' : 'gray'} />
       </div>
 
-      {/* Email scanner section */}
-      {emailConnection ? (
-        <>
-          <PagosDetectadosCron />
-          <section>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-bold text-gray-900">Pagos detectados en correo</h2>
-              <Link href="/arrendador/email" className="text-sm text-blue-700 hover:underline font-medium">
-                Ver historial →
-              </Link>
-            </div>
-            <PagosDetectadosAuto />
-          </section>
-        </>
-      ) : (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center gap-4">
-          <div className="flex-1">
-            <p className="font-semibold text-amber-900">Detecta pagos automáticamente</p>
-            <p className="text-sm text-amber-700 mt-1">
-              Conecta tu Gmail y el sistema identificará transferencias de tus arrendatarios en tus correos.
-            </p>
-          </div>
-          <Link
-            href="/arrendador/email"
-            className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-semibold px-5 py-2.5 rounded-lg text-sm transition-colors text-center"
-          >
-            Conectar Gmail
-          </Link>
+      {/* Pending WhatsApp payments */}
+      <PagosPendientesWhatsApp />
+
+      {/* WhatsApp config */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-lg">💬</span>
+          <h2 className="text-base font-semibold text-gray-900">Notificaciones por WhatsApp</h2>
         </div>
-      )}
+        <TelefonoArrendadorForm telefonoActual={arrendadorTelefono} />
+        {!arrendadorTelefono && (
+          <p className="text-xs text-gray-400 mt-3">
+            Agrega tu número para recibir reportes de pago de tus arrendatarios directamente en WhatsApp.
+            Cuando un arrendatario escriba <em>Pagué</em> al bot, recibirás una notificación para confirmar.
+          </p>
+        )}
+      </div>
 
       {/* Properties section */}
       <section>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-gray-900">Mis propiedades</h2>
           {puedeAgregarMas ? (
-            <Link
-              href="/arrendador/propiedades/nueva"
-              className="bg-blue-800 hover:bg-blue-900 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors"
-            >
+            <Link href="/arrendador/propiedades/nueva" className="bg-blue-800 hover:bg-blue-900 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors">
               + Nueva propiedad
             </Link>
           ) : (
-            <span className="text-sm text-gray-400 px-4 py-2 rounded-lg border border-gray-200">
-              Límite alcanzado
-            </span>
+            <span className="text-sm text-gray-400 px-4 py-2 rounded-lg border border-gray-200">Límite alcanzado</span>
           )}
         </div>
 
         {!propiedades || propiedades.length === 0 ? (
           <div className="bg-white border border-gray-200 rounded-xl p-10 text-center">
             <p className="text-gray-500 text-lg mb-3">No tienes propiedades registradas.</p>
-            <Link
-              href="/arrendador/propiedades/nueva"
-              className="inline-block bg-blue-800 hover:bg-blue-900 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
-            >
+            <Link href="/arrendador/propiedades/nueva" className="inline-block bg-blue-800 hover:bg-blue-900 text-white font-semibold px-6 py-3 rounded-lg transition-colors">
               Agregar primera propiedad
             </Link>
           </div>
@@ -214,17 +158,13 @@ export default async function ArrendadorDashboard() {
               const contrato = (contratos ?? []).find((c: Contrato) => c.propiedad_id === p.id)
               const pp = p as Propiedad & { arrendatario_informal_nombre?: string; arrendatario_informal_fecha_fin?: string }
               const tieneInformal = !contrato && !!pp.arrendatario_informal_nombre
-              const contratoVencido = tieneInformal && pp.arrendatario_informal_fecha_fin
-                && new Date(pp.arrendatario_informal_fecha_fin) < new Date()
+              const contratoVencido = tieneInformal && pp.arrendatario_informal_fecha_fin && new Date(pp.arrendatario_informal_fecha_fin) < new Date()
 
               const pagoFormal = contrato ? pagosFormalMap.get(contrato.id) : undefined
               const pagoInformal = tieneInformal ? pagosInformalMap.get(p.id) : undefined
               const pago = pagoFormal ?? pagoInformal
 
-              const diaPago = contrato
-                ? (contrato as Contrato & { dia_pago: number }).dia_pago
-                : p.dia_vencimiento
-
+              const diaPago = contrato ? (contrato as Contrato & { dia_pago: number }).dia_pago : p.dia_vencimiento
               const pagado = pago?.estado === 'pagado' || pago?.estado === 'atrasado'
               const pagoConAtraso = pagado && (pago?.estado === 'atrasado' || esPagoAtrasado(diaPago ?? 5, pago?.fecha_pago, mesActual))
               const sinPagoAtrasado = !pagado && !!diaPago && diasDeAtraso(diaPago, mesActual) > 0
@@ -261,17 +201,11 @@ export default async function ArrendadorDashboard() {
                     </div>
                     <p className="text-sm text-gray-500 mb-3">{p.direccion}</p>
                     {p.moneda === 'CLP' ? (
-                      <p className="text-xl font-bold text-blue-800">
-                        {formatCLP(p.valor_uf)} CLP/mes
-                      </p>
+                      <p className="text-xl font-bold text-blue-800">{formatCLP(p.valor_uf)} CLP/mes</p>
                     ) : (
                       <div>
-                        <p className="text-xl font-bold text-blue-800">
-                          {formatUF(p.valor_uf)} UF/mes
-                        </p>
-                        <p className="text-sm font-medium text-blue-500">
-                          ≈ {formatCLP(Math.round(p.valor_uf * ufHoy))} CLP/mes
-                        </p>
+                        <p className="text-xl font-bold text-blue-800">{formatUF(p.valor_uf)} UF/mes</p>
+                        <p className="text-sm font-medium text-blue-500">≈ {formatCLP(Math.round(p.valor_uf * ufHoy))} CLP/mes</p>
                       </div>
                     )}
                     {sinPagoAtrasado && (
@@ -294,24 +228,13 @@ export default async function ArrendadorDashboard() {
   )
 }
 
-function StatCard({
-  label,
-  value,
-  sub,
-  color,
-}: {
-  label: string
-  value: string
-  sub: string
-  color: 'blue' | 'green' | 'red' | 'gray'
-}) {
+function StatCard({ label, value, sub, color }: { label: string; value: string; sub: string; color: 'blue' | 'green' | 'red' | 'gray' }) {
   const styles = {
     blue: 'bg-blue-50 border-blue-100 text-blue-800',
     green: 'bg-green-50 border-green-100 text-green-800',
     red: 'bg-red-50 border-red-100 text-red-700',
     gray: 'bg-white border-gray-200 text-gray-700',
   }
-
   return (
     <div className={`rounded-xl border p-4 ${styles[color]}`}>
       <p className="text-xs font-semibold uppercase tracking-wide opacity-70 mb-1">{label}</p>

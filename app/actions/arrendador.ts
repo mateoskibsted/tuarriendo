@@ -481,6 +481,123 @@ export async function registrarPagoInformal(propiedadId: string, formData: FormD
   return { success: true }
 }
 
+export async function actualizarTelefonoArrendador(telefono: string) {
+  const { user, admin } = await getAuthContext()
+  if (!user) return { error: 'No autenticado' }
+  const normalized = telefono.trim() ? normalizePhone(telefono.trim()) : null
+  const { error } = await admin.from('profiles').update({ telefono: normalized }).eq('id', user.id)
+  if (error) return { error: error.message }
+  revalidatePath('/arrendador')
+  return { success: true }
+}
+
+export async function confirmarPagoPendienteWeb(pagoId: string) {
+  const { user, admin } = await getAuthContext()
+  if (!user) return { error: 'No autenticado' }
+
+  const { data: pago } = await admin
+    .from('pagos_pendientes')
+    .select('*')
+    .eq('id', pagoId)
+    .eq('arrendador_id', user.id)
+    .eq('estado', 'pendiente')
+    .single()
+
+  if (!pago) return { error: 'Pago pendiente no encontrado' }
+
+  const hoy = todayInChile()
+  const ufValue = await getUFValueForDate(hoy.toISOString())
+
+  // Get property/contract info
+  let valorUf = 0
+  let propNombre = 'arriendo'
+  let diaPago: number | null = null
+  let arrendatarioCelular: string | null = null
+
+  if (pago.propiedad_id) {
+    const { data: prop } = await admin
+      .from('propiedades')
+      .select('valor_uf, moneda, nombre, dia_vencimiento, arrendatario_informal_celular')
+      .eq('id', pago.propiedad_id)
+      .single()
+    valorUf = prop?.valor_uf ?? 0
+    propNombre = prop?.nombre ?? propNombre
+    diaPago = prop?.dia_vencimiento ?? null
+    arrendatarioCelular = prop?.arrendatario_informal_celular ?? null
+  } else if (pago.contrato_id) {
+    const { data: c } = await admin
+      .from('contratos')
+      .select('valor_uf, dia_pago, propiedades(nombre), profiles!contratos_arrendatario_id_fkey(telefono)')
+      .eq('id', pago.contrato_id)
+      .single()
+    valorUf = (c as unknown as { valor_uf: number } | null)?.valor_uf ?? 0
+    propNombre = (c as unknown as { propiedades?: { nombre: string } } | null)?.propiedades?.nombre ?? propNombre
+    diaPago = (c as unknown as { dia_pago: number } | null)?.dia_pago ?? null
+    arrendatarioCelular = (c as unknown as { profiles?: { telefono?: string } } | null)?.profiles?.telefono ?? pago.arrendatario_phone
+  }
+
+  let estado = 'pagado'
+  if (diaPago) {
+    const [year, month] = pago.periodo.split('-').map(Number)
+    const venc = new Date(year, month - 1, diaPago)
+    if (hoy > venc) estado = 'atrasado'
+  }
+
+  const { error: pagoError } = await admin.from('pagos').insert({
+    contrato_id: pago.contrato_id ?? null,
+    propiedad_id: pago.propiedad_id ?? null,
+    periodo: pago.periodo,
+    valor_uf: valorUf,
+    monto_clp: pago.monto_clp,
+    uf_valor_dia: ufValue,
+    estado,
+    fecha_pago: hoy.toISOString(),
+    notas: 'Pago reportado por WhatsApp',
+  })
+  if (pagoError) return { error: pagoError.message }
+
+  await admin.from('pagos_pendientes').update({ estado: 'confirmado' }).eq('id', pagoId)
+
+  const telefono = arrendatarioCelular ?? pago.arrendatario_phone
+  if (telefono) {
+    const { enviarWhatsApp } = await import('@/lib/utils/twilio')
+    const [year, month] = pago.periodo.split('-').map(Number)
+    const nombres = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+    const mesNombre = `${nombres[month - 1]} ${year}`
+    const clp = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(pago.monto_clp)
+    await enviarWhatsApp(telefono, `✅ Tu arrendador confirmó tu pago de *${clp}* para *${propNombre}* (${mesNombre}). ¡Gracias!`)
+  }
+
+  revalidatePath('/arrendador')
+  return { success: true }
+}
+
+export async function rechazarPagoPendienteWeb(pagoId: string) {
+  const { user, admin } = await getAuthContext()
+  if (!user) return { error: 'No autenticado' }
+
+  const { data: pago } = await admin
+    .from('pagos_pendientes')
+    .select('*')
+    .eq('id', pagoId)
+    .eq('arrendador_id', user.id)
+    .eq('estado', 'pendiente')
+    .single()
+
+  if (!pago) return { error: 'Pago pendiente no encontrado' }
+
+  await admin.from('pagos_pendientes').update({ estado: 'rechazado' }).eq('id', pagoId)
+
+  const telefono = pago.arrendatario_phone
+  if (telefono) {
+    const { enviarWhatsApp } = await import('@/lib/utils/twilio')
+    await enviarWhatsApp(telefono, `❌ Tu arrendador no pudo confirmar el pago reportado. Por favor contáctalo directamente.`)
+  }
+
+  revalidatePath('/arrendador')
+  return { success: true }
+}
+
 export async function desvincularArrendatario(contratoId: string) {
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }

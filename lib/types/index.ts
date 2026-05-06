@@ -70,7 +70,7 @@ export interface Pago {
   periodo: string
   valor_uf: number
   valor_clp?: number
-  uf_valor_dia?: number | null  // UF value on the exact payment date
+  uf_valor_dia?: number | null
   estado: EstadoPago
   fecha_pago?: string
   notas?: string
@@ -78,37 +78,15 @@ export interface Pago {
   created_at: string
 }
 
-export interface EmailConnection {
+export interface PagoPendiente {
   id: string
+  propiedad_id?: string | null
+  contrato_id?: string | null
+  arrendatario_phone: string
+  arrendatario_nombre?: string | null
   arrendador_id: string
-  provider: 'gmail'
-  email: string
-  connected_at: string
-  refresh_token?: string | null
-  expires_at?: string | null
-}
-
-export interface PeriodoOpcion {
-  periodo: string       // "YYYY-MM"
-  label: string         // "Marzo 2026 — pago atrasado (33 días)"
-  dias_atraso: number
-}
-
-export interface PagoSugerido {
-  emailId: string
-  fecha: string
-  asunto: string
-  monto_clp?: number
-  monto_total_esperado?: number  // base + multa acumulada
-  monto_faltante?: number        // diferencia entre esperado y recibido
-  rut_detectado?: string
-  nombre_detectado?: string
-  banco?: string
-  contrato_id?: string
-  propiedad_id?: string
-  arrendatario_nombre?: string
-  propiedad_nombre?: string
-  confianza: 'alta' | 'media' | 'baja'
+  monto_clp: number
   periodo: string
-  periodos_disponibles?: PeriodoOpcion[]  // si hay ambigüedad de mes
+  estado: 'pendiente' | 'confirmado' | 'rechazado'
+  created_at: string
 }
