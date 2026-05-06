@@ -67,6 +67,7 @@ export async function crearPropiedad(formData: FormData) {
     campos.arrendatario_informal_cobro_tipo = (formData.get('cobro_tipo') as string) || 'adelantado'
     campos.arrendatario_informal_fecha_inicio = fechaInicio || null
     campos.arrendatario_informal_fecha_fin = fechaFin || null
+    if (campos.arrendatario_informal_celular) campos.whatsapp_estado = 'pendiente'
 
     if (valorUfRaw) {
       campos.valor_uf = parseFloat(valorUfRaw)
@@ -77,9 +78,22 @@ export async function crearPropiedad(formData: FormData) {
     }
   }
 
-  const { error } = await admin.from('propiedades').insert(campos)
+  const { data: propInsertada, error } = await admin.from('propiedades').insert(campos).select('id, nombre').single()
 
   if (error) return { error: error.message }
+
+  // Send WhatsApp opt-in if phone was provided
+  const celularNorm = campos.arrendatario_informal_celular as string | null
+  if (celularNorm && propInsertada) {
+    const mensaje =
+      `Hola ${arrendatarioNombre} 👋\n\n` +
+      `Tu arrendador te ha registrado como arrendatario de *${propInsertada.nombre}*.\n\n` +
+      `A partir de ahora podrías recibir recordatorios de pago de arriendo por WhatsApp.\n\n` +
+      `¿Estás de acuerdo?\n` +
+      `✅ Responde *Si* para confirmar\n` +
+      `❌ Responde *No* para rechazar`
+    await enviarWhatsApp(celularNorm, mensaje)
+  }
 
   revalidatePath('/arrendador')
   return { success: true }
