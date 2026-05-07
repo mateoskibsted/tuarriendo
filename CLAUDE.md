@@ -137,7 +137,7 @@ Todas las tablas tienen **RLS habilitado**. El `createAdminClient()` (service ro
 2. Arrendatario informal (`propiedades.arrendatario_informal_celular`)
 3. Arrendatario formal (`profiles.rol = 'arrendatario'` con telefono)
 
-**Arrendatario → "Pagué" (o variantes):**
+**Arrendatario → "Pagado" (o variantes):**
 1. Webhook detecta keyword de pago → guarda sesión `whatsapp_sesiones.estado = 'esperando_monto'`
 2. Arrendatario responde con el monto → webhook crea `pagos_pendientes`, borra sesión
 3. Notifica al arrendador por Twilio outbound (si tiene telefono configurado)

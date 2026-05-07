@@ -73,9 +73,9 @@ function parsearMonto(text: string): number | null {
 }
 
 const KEYWORDS_PAGO = [
-  'pague', 'ya pague', 'hice el pago', 'realice el pago', 'hize el pago',
+  'pagado', 'ya pagado', 'hice el pago', 'realice el pago', 'hize el pago',
   'transferi', 'deposite', 'hice la transferencia', 'hize la transferencia',
-  'ya pago', 'pago listo', 'te pague', 'pague el arriendo', 'ya realize',
+  'ya pago', 'pago listo', 'pague el arriendo', 'ya realize',
 ]
 
 function esMensajeDePago(msgNorm: string): boolean {
@@ -394,7 +394,7 @@ async function handleArrendatarioInformal(
       `Listo, ${nombre}! Quedaste conectado a los recordatorios de *${propNombre}*.\n\n` +
       `Arriendo: ${montoTexto}/mes\n` +
       (dia ? `Vencimiento: día ${dia} de cada mes\n\n` : '\n') +
-      `Cuando hagas tu pago, escríbeme *Pagué* y te ayudo a reportarlo.`
+      `Cuando hagas tu pago, escríbeme *Pagado* y te ayudo a reportarlo.`
     )
   }
 
@@ -420,7 +420,7 @@ async function handleArrendatarioInformal(
   return twiml(
     `Hola ${nombre}! Soy el asistente de arriendos de *${propNombre}*.\n\n` +
     `Arriendo: ${montoTexto}/mes${estadoTexto}\n\n` +
-    `Escribe *Pagué* para reportar tu pago.`
+    `Escribe *Pagado* para reportar tu pago.`
   )
 }
 
@@ -587,6 +587,6 @@ async function handleArrendatarioFormal(
     `Hola ${nombre}! Estado de *${propNombre}*:\n\n` +
     `Arriendo: ${montoTexto}/mes\n` +
     `${estadoTexto}\n\n` +
-    `Escribe *Pagué* para reportar tu pago.`
+    `Escribe *Pagado* para reportar tu pago.`
   )
 }

@@ -127,7 +127,7 @@ export default async function ArrendadorDashboard() {
         {!arrendadorTelefono && (
           <p className="text-xs text-gray-400 mt-3">
             Agrega tu número para recibir reportes de pago de tus arrendatarios directamente en WhatsApp.
-            Cuando un arrendatario escriba <em>Pagué</em> al bot, recibirás una notificación para confirmar.
+            Cuando un arrendatario escriba <em>Pagado</em> al bot, recibirás una notificación para confirmar.
           </p>
         )}
       </div>
