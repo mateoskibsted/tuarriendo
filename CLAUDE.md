@@ -85,14 +85,14 @@ Todas las tablas tienen **RLS habilitado**. El `createAdminClient()` (service ro
 - periodo (YYYY-MM), valor_uf, monto_clp, estado ('pagado' | 'atrasado' | 'incompleto')
 - fecha_pago, notas, created_at
 
-### pagos_pendientes ← NUEVA
+### pagos_pendientes
 - id, propiedad_id (nullable), contrato_id (nullable)
 - arrendatario_phone, arrendatario_nombre
 - arrendador_id, monto_clp, periodo
 - estado ('pendiente' | 'confirmado' | 'rechazado'), created_at
-- Creado cuando arrendatario reporta pago por WhatsApp; eliminado (estado) cuando arrendador confirma/rechaza
+- Creado cuando arrendatario reporta pago por WhatsApp; arrendador confirma/rechaza desde dashboard o WhatsApp
 
-### whatsapp_sesiones ← NUEVA
+### whatsapp_sesiones
 - phone (PK), estado ('esperando_monto')
 - propiedad_id (nullable), contrato_id (nullable), periodo (nullable)
 - updated_at
@@ -193,9 +193,17 @@ CRON_SECRET=
 UF_CACHE_HOURS=24
 ```
 
+## Vercel — notas de deploy
+
+- Si el build falla por archivos stale del `.next/` (tipo `validator.ts` referenciando rutas eliminadas): usar `vercel deploy --prod --force` para bypassar el cache de Vercel
+- Variables de entorno "Needs Attention": abrir cada una en Settings → Environment Variables → Edit → Save (sin cambiar el valor). Las obsoletas se eliminan con `vercel env rm NOMBRE --yes`
+- Variables obsoletas ya eliminadas (mayo 2026): `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+
 ## Regla de colaboración
 Antes de empezar cualquier tarea siempre ejecutar:
 `git pull origin main`
 
 Después de terminar cada tarea siempre ejecutar:
 `git add . && git commit -m "descripción breve" && git push origin main && vercel --prod`
+
+Al final de cada sesión: actualizar este CLAUDE.md con lo que cambió (nuevas tablas, decisiones de arquitectura, bugs conocidos, notas de deploy).
