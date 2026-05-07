@@ -19,7 +19,7 @@ export function formatWhatsAppNumber(telefono: string): string {
   return `whatsapp:+${digits}`
 }
 
-export async function enviarWhatsApp(telefono: string, mensaje: string): Promise<boolean> {
+export async function enviarWhatsApp(telefono: string, mensaje: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const client = getTwilioClient()
     await client.messages.create({
@@ -27,9 +27,10 @@ export async function enviarWhatsApp(telefono: string, mensaje: string): Promise
       to: formatWhatsAppNumber(telefono),
       body: mensaje,
     })
-    return true
+    return { ok: true }
   } catch (err) {
-    console.error('Error Twilio:', err)
-    return false
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('Error Twilio:', msg)
+    return { ok: false, error: msg }
   }
 }

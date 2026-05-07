@@ -488,6 +488,13 @@ export async function actualizarTelefonoArrendador(telefono: string) {
   const { error } = await admin.from('profiles').update({ telefono: normalized }).eq('id', user.id)
   if (error) return { error: error.message }
   revalidatePath('/arrendador')
+  if (normalized) {
+    await enviarWhatsApp(normalized,
+      `✅ Tu número quedó registrado en TuArriendo.\n\n` +
+      `Cuando un arrendatario reporte un pago por WhatsApp, recibirás una notificación aquí.\n\n` +
+      `Para confirmar: responde *Confirmar*\nPara rechazar: responde *Rechazar*`
+    )
+  }
   return { success: true }
 }
 
