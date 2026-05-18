@@ -31,7 +31,7 @@ function RegistroForm() {
   const codigoUrl = searchParams.get('codigo') ?? ''
 
   const [rut, setRut] = useState('')
-  const [role, setRole] = useState<'arrendador' | 'arrendatario'>(codigoUrl ? 'arrendatario' : 'arrendador')
+  const [role, setRole] = useState<'arrendador' | 'arrendatario'>(codigoUrl ? 'arrendatario' : 'arrendador') // DB values unchanged
   const [error, setError] = useState('')
   const [isPending, startTransition] = useTransition()
 
@@ -59,9 +59,9 @@ function RegistroForm() {
       {/* Logo */}
       <div className="text-center mb-8">
         <div className="w-16 h-16 bg-blue-900 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-md">
-          <span className="text-white font-black text-xl">TA</span>
+          <span className="text-white font-black text-xl">Owe</span>
         </div>
-        <h1 className="text-3xl font-black text-gray-900">tuarriendo</h1>
+        <h1 className="text-3xl font-black text-gray-900">Owe</h1>
         <p className="text-gray-500 mt-1">Crea tu cuenta nueva</p>
       </div>
 
@@ -79,7 +79,7 @@ function RegistroForm() {
                 : 'text-gray-600 hover:text-gray-900'
             }`}
           >
-            Soy arrendador
+            Soy acreedor
           </button>
           <button
             type="button"
@@ -90,7 +90,7 @@ function RegistroForm() {
                 : 'text-gray-600 hover:text-gray-900'
             }`}
           >
-            Soy arrendatario
+            Soy deudor
           </button>
         </div>
 
@@ -127,7 +127,7 @@ function RegistroForm() {
               </FieldGroup>
               <FieldGroup
                 label="Código de invitación"
-                hint={codigoUrl ? 'Código recibido por WhatsApp' : 'Solicita este código a tu arrendador'}
+                hint={codigoUrl ? 'Código recibido por WhatsApp' : 'Solicita este código a tu acreedor'}
               >
                 <input
                   name="codigo_invitacion"

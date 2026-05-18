@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { eliminarPropiedad } from '@/app/actions/arrendador'
+import { eliminarPropiedad } from '@/app/actions/acreedor'
 import { useRouter } from 'next/navigation'
 import Button from '@/components/ui/Button'
 
@@ -13,7 +13,7 @@ export default function EliminarPropiedadButton({ propiedadId }: { propiedadId: 
   function handleEliminar() {
     startTransition(async () => {
       const result = await eliminarPropiedad(propiedadId)
-      if (result.success) router.push('/arrendador')
+      if (result.success) router.push('/acreedor')
     })
   }
 

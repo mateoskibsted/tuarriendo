@@ -56,7 +56,7 @@ export async function login(formData: FormData) {
   await clearRateLimit(ip)
 
   revalidatePath('/', 'layout')
-  redirect(profile.role === 'arrendador' ? '/arrendador' : '/arrendatario')
+  redirect(profile.role === 'arrendador' ? '/acreedor' : '/deudor')
 }
 
 export async function registro(formData: FormData) {
@@ -170,7 +170,7 @@ export async function registro(formData: FormData) {
   }
 
   revalidatePath('/', 'layout')
-  redirect(role === 'arrendador' ? '/arrendador' : '/arrendatario')
+  redirect(role === 'arrendador' ? '/acreedor' : '/deudor')
 }
 
 export async function logout() {

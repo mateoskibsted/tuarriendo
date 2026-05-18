@@ -1,27 +1,36 @@
-# ArriendoPro — Instrucciones del proyecto
+# Owe — Instrucciones del proyecto
 
-App web de gestión de arriendos para Chile. Permite a arrendadores administrar sus propiedades y a arrendatarios ver sus pagos.
+App web para gestionar deudas personales entre personas. Permite a acreedores crear y hacer seguimiento de deudas, y a deudores ver lo que deben y reportar pagos.
+
+**Casos de uso**: clases particulares, gastos compartidos, ligas deportivas, préstamos entre amigos, servicios freelance.
+
+## Pivote desde ArriendoPro (mayo 2026)
+- `arrendador` → `acreedor` (quien cobra)
+- `arrendatario` → `deudor` (quien debe)
+- `propiedad` → `deuda` (concepto, monto, fecha límite)
+- Eliminado: UF, días fijos de vencimiento, multas automáticas, contratos formales/informales
+- Mantenido: bot WhatsApp bidireccional, crons, Supabase, Twilio
 
 ## Stack técnico
 - **Framework**: Next.js 14 con App Router y TypeScript
 - **Base de datos y auth**: Supabase (RLS habilitado en todas las tablas)
 - **Estilos**: Tailwind CSS
 - **Deploy**: Vercel (Hobby plan — 2 crons)
-- **WhatsApp**: Twilio Sandbox (bot bidireccional: notificaciones + reporte de pagos)
+- **WhatsApp**: Twilio Sandbox (bot bidireccional: recordatorios + reporte de pagos)
 - **Cron**: 2 Vercel Cron Jobs — mañana (10 AM Chile) y noche (9 PM Chile)
 
-## Estructura de carpetas real
+## Estructura de carpetas objetivo
 ```
 app/
-  arrendador/
-    page.tsx                        # Dashboard: stats, pagos pendientes WhatsApp, propiedades
-    TelefonoArrendadorForm.tsx      # Form cliente para que arrendador guarde su WhatsApp
-    PagosPendientesWhatsApp.tsx     # Server component: lista pagos_pendientes del arrendador
+  acreedor/
+    page.tsx                        # Dashboard: stats, pagos pendientes WhatsApp, deudas
+    TelefonoAcreedorForm.tsx        # Form cliente para que acreedor guarde su WhatsApp
+    PagosPendientesWhatsApp.tsx     # Server component: lista pagos_pendientes del acreedor
     ConfirmarRechazarPago.tsx       # Client component: botones confirmar/rechazar pago pendiente
-    propiedades/
-      [id]/page.tsx                 # Detalle de propiedad (formal e informal)
-      nueva/page.tsx                # Formulario nueva propiedad
-  arrendatario/
+    deudas/
+      [id]/page.tsx                 # Detalle de deuda
+      nueva/page.tsx                # Formulario nueva deuda
+  deudor/
     page.tsx
   api/
     cron/
@@ -29,9 +38,9 @@ app/
       noche/route.ts    # 9 PM Chile: llama notificaciones?turno=noche
       notificaciones/route.ts  # WhatsApp salientes: aviso_3d/2d/1d + vencimiento + atraso
     whatsapp/
-      webhook/route.ts  # Bidireccional: arrendatario reporta pago, arrendador confirma
+      webhook/route.ts  # Bidireccional: deudor reporta pago, acreedor confirma
   actions/
-    arrendador.ts       # Server Actions: CRUD propiedades, pagos, arrendatarios, teléfonos
+    acreedor.ts         # Server Actions: CRUD deudas, pagos, deudores, teléfonos
   login/page.tsx
   registro/page.tsx
   layout.tsx
@@ -49,127 +58,105 @@ lib/
     middleware.ts
   types/index.ts
   utils/
-    uf.ts         # getUFValue(), getUFValueForDate(), formatUF(), formatCLP()
+    currency.ts   # formatCLP(), formatMonto() — sin UF
     date.ts       # todayInChile() — UTC-4 fijo
     twilio.ts     # enviarWhatsApp(), formatWhatsAppNumber()
-    rut.ts
+    rut.ts        # Opcional — identificación chilena
 vercel.json       # 2 crons: manana (0 14 * * *) y noche (0 1 * * *)
 ```
 
-## Base de datos (tablas reales en Supabase)
+## Base de datos (tablas objetivo en Supabase)
 
 Todas las tablas tienen **RLS habilitado**. El `createAdminClient()` (service role) bypasa RLS.
 
 ### profiles
-- id (= auth.users.id), nombre, rut, email, rol ('arrendador' | 'arrendatario')
-- telefono (WhatsApp — tanto arrendadores como arrendatarios), created_at
+- id (= auth.users.id), nombre, rut (opcional), email, rol ('acreedor' | 'deudor')
+- telefono (WhatsApp), created_at
 
-### propiedades
-- id, arrendador_id, nombre, direccion, tipo
-- valor_uf (número), moneda ('UF' | 'CLP')
-- dia_vencimiento, activa, created_at
-- multa_monto, multa_moneda ('UF' | 'CLP') — multa diaria por atraso
-- **Arrendatario informal**:
-  - arrendatario_informal_nombre, arrendatario_informal_rut
-  - arrendatario_informal_celular (WhatsApp)
-  - arrendatario_informal_cobro_tipo ('adelantado' | 'atrasado')
-  - arrendatario_informal_fecha_inicio, arrendatario_informal_fecha_fin
-  - whatsapp_estado ('pendiente' | 'confirmado' | 'rechazado')
-
-### contratos
-- id, propiedad_id, arrendatario_id, fecha_inicio, fecha_fin, activo
-- dia_pago
-
-### pagos
-- id, contrato_id (nullable), propiedad_id (nullable — para informales)
-- periodo (YYYY-MM), valor_uf, monto_clp, estado ('pagado' | 'atrasado' | 'incompleto')
-- fecha_pago, notas, created_at
+### deudas
+- id, acreedor_id (FK → profiles)
+- descripcion — qué es la deuda ("Clases de inglés marzo", "Mitad cena cumpleaños")
+- deudor_nombre, deudor_celular (WhatsApp del deudor — no requiere cuenta)
+- monto (CLP), fecha_vencimiento (DATE — fecha límite de pago)
+- estado ('pendiente' | 'pagada' | 'vencida'), activa, created_at
+- whatsapp_estado ('pendiente' | 'confirmado' | 'rechazado') — opt-in del deudor
 
 ### pagos_pendientes
-- id, propiedad_id (nullable), contrato_id (nullable)
-- arrendatario_phone, arrendatario_nombre
-- arrendador_id, monto_clp, periodo
+- id, deuda_id (FK → deudas)
+- deudor_phone, deudor_nombre
+- acreedor_id, monto, fecha_reporte
 - estado ('pendiente' | 'confirmado' | 'rechazado'), created_at
-- Creado cuando arrendatario reporta pago por WhatsApp; arrendador confirma/rechaza desde dashboard o WhatsApp
+- Creado cuando deudor reporta pago por WhatsApp; acreedor confirma/rechaza desde dashboard o WhatsApp
 
 ### whatsapp_sesiones
 - phone (PK), estado ('esperando_monto')
-- propiedad_id (nullable), contrato_id (nullable), periodo (nullable)
+- deuda_id (nullable)
 - updated_at
 - Estado de conversación multi-turno en el webhook
 
 ### notificaciones_log
-- id, contrato_id, propiedad_id (nullable), tipo, periodo, mensaje, exitosa, created_at
+- id, deuda_id, tipo, fecha_referencia, mensaje, exitosa, created_at
 - Previene duplicar notificaciones salientes del cron
 
 ### codigos_invitacion
-- id, arrendador_id, propiedad_id, arrendatario_rut, arrendatario_nombre
-- arrendatario_email, codigo, usado, expira_en, created_at
+- id, acreedor_id, deuda_id, deudor_email, codigo, usado, expira_en, created_at
+- Para vincular deudores que quieren tener cuenta
 
-## Reglas de negocio críticas
+## Reglas de negocio
 
-### RUT chileno
-- Almacenar sin puntos ni guión; mostrar formateado "12.345.678-9"
-- Usar `lib/utils/rut.ts`
-
-### Valor UF
-- Obtener desde: https://mindicador.cl/api/uf — cachear 24 horas
-- `lib/utils/uf.ts`: `getUFValue()`, `getUFValueForDate(date)`, `formatUF()`, `formatCLP()`
-- **CRÍTICO**: `Math.round(Number(valor_uf))` — Supabase devuelve numéricos como strings
+### Moneda
+- Solo CLP (o monto libre ingresado por el acreedor)
+- `formatCLP()` en `lib/utils/currency.ts`
+- **CRÍTICO**: `Math.round(Number(monto))` — Supabase devuelve numéricos como strings
 
 ### Fecha y hora en Chile
 - `todayInChile()` de `lib/utils/date.ts` — UTC-4 fijo desde 2024
 
 ### Roles y acceso
-- **Arrendador**: crea propiedades, gestiona arrendatarios/pagos, confirma reportes WhatsApp
-- **Arrendatario**: ve su propiedad, monto y historial de pagos
+- **Acreedor**: crea deudas, gestiona deudores, confirma reportes WhatsApp
+- **Deudor**: ve sus deudas y estado de pagos (opcional — no requiere cuenta)
 - Redirigir automáticamente según rol tras login
 
-### Arrendatarios informales vs formales
-- **Formal**: contrato en `contratos`, vinculado a `profiles`
-- **Informal**: campos `arrendatario_informal_*` en `propiedades`, sin contrato
-- Pagos informales usan `propiedad_id`; formales usan `contrato_id`
+### Flujo principal
+1. Acreedor crea deuda con descripción, monto, fecha_vencimiento y celular del deudor
+2. Bot WhatsApp envía opt-in al deudor automáticamente
+3. Cron envía recordatorios: 3d antes, 2d antes, 1d antes, día de vencimiento, días de atraso
+4. Deudor responde "Pagado" → sesión multi-turno → reporta monto → crea `pagos_pendientes`
+5. Acreedor recibe notificación y confirma/rechaza desde dashboard o WhatsApp
 
 ### Flujo WhatsApp bidireccional (webhook `/api/whatsapp/webhook`)
 
 **Identificación por número entrante (orden de prioridad):**
-1. Arrendador (`profiles.rol = 'arrendador'` con telefono)
-2. Arrendatario informal (`propiedades.arrendatario_informal_celular`)
-3. Arrendatario formal (`profiles.rol = 'arrendatario'` con telefono)
+1. Acreedor (`profiles.rol = 'acreedor'` con telefono)
+2. Deudor (`deudas.deudor_celular`)
 
-**Arrendatario → "Pagado" (o variantes):**
+**Deudor → "Pagado" (o variantes):**
 1. Webhook detecta keyword de pago → guarda sesión `whatsapp_sesiones.estado = 'esperando_monto'`
-2. Arrendatario responde con el monto → webhook crea `pagos_pendientes`, borra sesión
-3. Notifica al arrendador por Twilio outbound (si tiene telefono configurado)
-4. Responde al arrendatario: "Tu reporte fue enviado"
+2. Deudor responde con el monto → webhook crea `pagos_pendientes`, borra sesión
+3. Notifica al acreedor por Twilio outbound (si tiene telefono configurado)
+4. Responde al deudor: "Tu reporte fue enviado"
 
-**Arrendador → "Confirmar" / "Rechazar":**
-1. Webhook detecta arrendador → busca `pagos_pendientes` más antiguo (FIFO)
-2. "Confirmar" → crea `pagos` record, actualiza `pagos_pendientes.estado = 'confirmado'`, notifica arrendatario
-3. "Rechazar" → actualiza estado, notifica arrendatario
+**Acreedor → "Confirmar" / "Rechazar":**
+1. Webhook detecta acreedor → busca `pagos_pendientes` más antiguo (FIFO)
+2. "Confirmar" → actualiza `deudas.estado = 'pagada'`, actualiza `pagos_pendientes.estado = 'confirmado'`, notifica deudor
+3. "Rechazar" → actualiza estado, notifica deudor
 4. Sin pendientes → muestra mensaje informativo
 
-**Opt-in arrendatario:**
-- "Si" → `propiedades.whatsapp_estado = 'confirmado'`
-- "No" → `propiedades.whatsapp_estado = 'rechazado'`
-- Opt-in se envía automáticamente al crear/editar arrendatario con celular nuevo
+**Opt-in deudor:**
+- "Si" → `deudas.whatsapp_estado = 'confirmado'`
+- "No" → `deudas.whatsapp_estado = 'rechazado'`
+- Opt-in se envía automáticamente al crear deuda con celular
 
 ### Bot de WhatsApp — notificaciones salientes (cron)
 - Usa Twilio Sandbox: `whatsapp:+14155238886`
-- Webhook URL: `https://tuarriendo-ten.vercel.app/api/whatsapp/webhook`
+- Webhook URL: `https://owe-app.vercel.app/api/whatsapp/webhook` *(actualizar con dominio real)*
 - **Mañana** (10 AM Chile, `0 14 * * *` UTC): aviso_3d, aviso_2d, aviso_1d, vencimiento_m, atraso_N_m
 - **Noche** (9 PM Chile, `0 1 * * *` UTC): vencimiento_n, atraso_N_n
-- Deduplicación: `notificaciones_log` previene repetir el mismo `tipo` en el mismo `periodo`
-- Maneja ambos: contratos formales + informales
+- Deduplicación: `notificaciones_log` previene repetir el mismo `tipo` en la misma `fecha_referencia`
 
-### Multas por atraso
-- Configuradas por propiedad: `multa_monto` + `multa_moneda`
-- `multaAcumuladaCLP = multaDiariaCLP * diasAtraso`
-- Total = `Math.round(Number(montoPrincipal)) + multaAcumuladaCLP`
-
-### Identificación de arrendador en webhook
-- El arrendador también debe tener su WhatsApp en `profiles.telefono`
-- Se puede configurar desde el dashboard (`TelefonoArrendadorForm`)
+### Identificación de acreedor en webhook
+- El acreedor debe tener su WhatsApp en `profiles.telefono`
+- Configurable desde dashboard (`TelefonoAcreedorForm`)
 - Sin telefono → los reportes WhatsApp solo aparecen en el dashboard web
 
 ## Convenciones de código
@@ -190,14 +177,13 @@ TWILIO_AUTH_TOKEN=
 TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
 
 CRON_SECRET=
-UF_CACHE_HOURS=24
 ```
 
 ## Vercel — notas de deploy
 
-- Si el build falla por archivos stale del `.next/` (tipo `validator.ts` referenciando rutas eliminadas): usar `vercel deploy --prod --force` para bypassar el cache de Vercel
-- Variables de entorno "Needs Attention": abrir cada una en Settings → Environment Variables → Edit → Save (sin cambiar el valor). Las obsoletas se eliminan con `vercel env rm NOMBRE --yes`
-- Variables obsoletas ya eliminadas (mayo 2026): `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+- Si el build falla por archivos stale del `.next/`: usar `vercel deploy --prod --force`
+- Variables de entorno "Needs Attention": Edit → Save sin cambiar valor
+- Variables obsoletas ya eliminadas (mayo 2026): `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `UF_CACHE_HOURS`
 
 ## Regla de colaboración
 Antes de empezar cualquier tarea siempre ejecutar:

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { generarCodigoInvitacion } from '@/app/actions/arrendador'
+import { generarCodigoInvitacion } from '@/app/actions/acreedor'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import type { CodigoInvitacion } from '@/lib/types'

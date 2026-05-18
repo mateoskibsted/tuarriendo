@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { actualizarTelefonoArrendador } from '@/app/actions/arrendador'
+import { actualizarTelefonoArrendador } from '@/app/actions/acreedor'
 
 export default function TelefonoArrendadorForm({ telefonoActual }: { telefonoActual?: string | null }) {
   const [editando, setEditando] = useState(false)

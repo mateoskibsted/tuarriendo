@@ -30,10 +30,10 @@ export default function LoginPage() {
       {/* Logo + marca */}
       <div className="text-center mb-8">
         <div className="w-16 h-16 bg-blue-900 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-md">
-          <span className="text-white font-black text-xl">TA</span>
+          <span className="text-white font-black text-xl">Owe</span>
         </div>
-        <h1 className="text-3xl font-black text-gray-900">tuarriendo</h1>
-        <p className="text-gray-500 mt-1">Gestión de arriendos en Chile</p>
+        <h1 className="text-3xl font-black text-gray-900">Owe</h1>
+        <p className="text-gray-500 mt-1">Gestión de deudas personales</p>
       </div>
 
       {/* Card */}

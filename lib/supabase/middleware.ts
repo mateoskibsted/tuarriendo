@@ -48,10 +48,11 @@ export async function updateSession(request: NextRequest) {
       .eq('id', user.id)
       .single()
 
+    // DB role values are still 'arrendador'/'arrendatario' — routes are now /acreedor and /deudor
     if (profile?.role === 'arrendador') {
-      return NextResponse.redirect(new URL('/arrendador', request.url))
+      return NextResponse.redirect(new URL('/acreedor', request.url))
     } else if (profile?.role === 'arrendatario') {
-      return NextResponse.redirect(new URL('/arrendatario', request.url))
+      return NextResponse.redirect(new URL('/deudor', request.url))
     }
   }
 

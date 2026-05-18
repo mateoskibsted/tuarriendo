@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, Fragment } from 'react'
-import { registrarPago, registrarPagoInformal, eliminarPago } from '@/app/actions/arrendador'
+import { registrarPago, registrarPagoInformal, eliminarPago } from '@/app/actions/acreedor'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'

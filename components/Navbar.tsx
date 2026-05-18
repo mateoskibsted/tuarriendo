@@ -17,9 +17,9 @@ export default function Navbar({ profile }: { profile: Profile }) {
           {/* Logo */}
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-white rounded-md flex items-center justify-center shrink-0">
-              <span className="text-blue-900 font-black text-sm">TA</span>
+              <span className="text-blue-900 font-black text-sm">Owe</span>
             </div>
-            <span className="text-lg font-bold tracking-tight">tuarriendo</span>
+            <span className="text-lg font-bold tracking-tight">Owe</span>
           </div>
 
           {/* Right: user + logout */}

@@ -95,7 +95,7 @@ export async function crearPropiedad(formData: FormData) {
     await enviarWhatsApp(celularNorm, mensaje)
   }
 
-  revalidatePath('/arrendador')
+  revalidatePath('/acreedor')
   return { success: true }
 }
 
@@ -129,9 +129,9 @@ export async function actualizarPropiedad(id: string, formData: FormData) {
 
   if (error) return { error: error.message }
 
-  revalidatePath('/arrendador')
-  revalidatePath(`/arrendador/propiedades/${id}`)
-  revalidatePath('/arrendador/propiedades')
+  revalidatePath('/acreedor')
+  revalidatePath(`/acreedor/deudas/${id}`)
+  revalidatePath('/acreedor/deudas')
   return { success: true }
 }
 
@@ -159,7 +159,7 @@ export async function generarCodigoInvitacion(propiedadId: string) {
 
   if (error) return { error: error.message }
 
-  revalidatePath('/arrendador')
+  revalidatePath('/acreedor')
   return { success: true, codigo: data.codigo }
 }
 
@@ -204,7 +204,7 @@ export async function registrarPago(contratoId: string, formData: FormData) {
     if (error) return { error: error.message }
   }
 
-  revalidatePath('/arrendador')
+  revalidatePath('/acreedor')
   return { success: true }
 }
 
@@ -223,7 +223,7 @@ export async function actualizarContrato(id: string, formData: FormData) {
 
   if (error) return { error: error.message }
 
-  revalidatePath('/arrendador')
+  revalidatePath('/acreedor')
   return { success: true }
 }
 
@@ -249,7 +249,7 @@ export async function eliminarPropiedad(propiedadId: string) {
 
   if (error) return { error: error.message }
 
-  revalidatePath('/arrendador')
+  revalidatePath('/acreedor')
   return { success: true }
 }
 
@@ -314,8 +314,8 @@ export async function guardarArrendatarioInformal(propiedadId: string, formData:
     await enviarWhatsApp(celularNorm, mensaje)
   }
 
-  revalidatePath(`/arrendador/propiedades/${propiedadId}`)
-  revalidatePath('/arrendador')
+  revalidatePath(`/acreedor/deudas/${propiedadId}`)
+  revalidatePath('/acreedor')
   return { success: true }
 }
 
@@ -334,8 +334,8 @@ export async function limpiarArrendatarioInformal(propiedadId: string) {
 
   if (error) return { error: error.message }
 
-  revalidatePath(`/arrendador/propiedades/${propiedadId}`)
-  revalidatePath('/arrendador')
+  revalidatePath(`/acreedor/deudas/${propiedadId}`)
+  revalidatePath('/acreedor')
   return { success: true }
 }
 
@@ -362,7 +362,7 @@ export async function actualizarTelefonoArrendatario(arrendatarioId: string, tel
     .eq('id', arrendatarioId)
 
   if (error) return { error: error.message }
-  revalidatePath('/arrendador/propiedades')
+  revalidatePath('/acreedor/deudas')
   return { success: true }
 }
 
@@ -400,8 +400,8 @@ export async function eliminarPago(pagoId: string) {
   const { error } = await admin.from('pagos').delete().eq('id', pagoId)
   if (error) return { error: error.message }
 
-  revalidatePath('/arrendador')
-  revalidatePath('/arrendador/propiedades')
+  revalidatePath('/acreedor')
+  revalidatePath('/acreedor/deudas')
   return { success: true }
 }
 
@@ -476,8 +476,8 @@ export async function registrarPagoInformal(propiedadId: string, formData: FormD
     if (error) return { error: error.message }
   }
 
-  revalidatePath(`/arrendador/propiedades/${propiedadId}`)
-  revalidatePath('/arrendador')
+  revalidatePath(`/acreedor/deudas/${propiedadId}`)
+  revalidatePath('/acreedor')
   return { success: true }
 }
 
@@ -487,7 +487,7 @@ export async function actualizarTelefonoArrendador(telefono: string) {
   const normalized = telefono.trim() ? normalizePhone(telefono.trim()) : null
   const { error } = await admin.from('profiles').update({ telefono: normalized }).eq('id', user.id)
   if (error) return { error: error.message }
-  revalidatePath('/arrendador')
+  revalidatePath('/acreedor')
   if (normalized) {
     await enviarWhatsApp(normalized,
       `✅ Tu número quedó registrado en TuArriendo.\n\n` +
@@ -575,7 +575,7 @@ export async function confirmarPagoPendienteWeb(pagoId: string) {
     await enviarWhatsApp(telefono, `✅ Tu arrendador confirmó tu pago de *${clp}* para *${propNombre}* (${mesNombre}). ¡Gracias!`)
   }
 
-  revalidatePath('/arrendador')
+  revalidatePath('/acreedor')
   return { success: true }
 }
 
@@ -601,7 +601,7 @@ export async function rechazarPagoPendienteWeb(pagoId: string) {
     await enviarWhatsApp(telefono, `❌ Tu arrendador no pudo confirmar el pago reportado. Por favor contáctalo directamente.`)
   }
 
-  revalidatePath('/arrendador')
+  revalidatePath('/acreedor')
   return { success: true }
 }
 
@@ -628,6 +628,6 @@ export async function desvincularArrendatario(contratoId: string) {
 
   if (error) return { error: error.message }
 
-  revalidatePath('/arrendador')
+  revalidatePath('/acreedor')
   return { success: true }
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { desvincularArrendatario } from '@/app/actions/arrendador'
+import { desvincularArrendatario } from '@/app/actions/acreedor'
 import Button from '@/components/ui/Button'
 
 export default function DesvincularButton({

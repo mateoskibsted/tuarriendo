@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import Navbar from '@/components/Navbar'
 import type { Profile } from '@/lib/types'
 
-export default async function ArrendatarioLayout({ children }: { children: React.ReactNode }) {
+export default async function ArrendadorLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
@@ -20,7 +20,7 @@ export default async function ArrendatarioLayout({ children }: { children: React
 
   // If no profile, go to login — never redirect to the opposite panel (causes loop)
   if (!profile) redirect('/login')
-  if (profile.role !== 'arrendatario') redirect('/arrendador')
+  if (profile.role !== 'arrendador') redirect('/deudor')
 
   return (
     <div className="min-h-screen flex flex-col">

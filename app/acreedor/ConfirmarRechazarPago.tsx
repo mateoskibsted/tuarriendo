@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { confirmarPagoPendienteWeb, rechazarPagoPendienteWeb } from '@/app/actions/arrendador'
+import { confirmarPagoPendienteWeb, rechazarPagoPendienteWeb } from '@/app/actions/acreedor'
 import type { PagoPendiente } from '@/lib/types'
 
 function formatCLP(n: number) {

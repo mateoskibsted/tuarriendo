@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { actualizarTelefonoArrendatario } from '@/app/actions/arrendador'
+import { actualizarTelefonoArrendatario } from '@/app/actions/acreedor'
 
 export default function TelefonoArrendatarioForm({
   arrendatarioId,

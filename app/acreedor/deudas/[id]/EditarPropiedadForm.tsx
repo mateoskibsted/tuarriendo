@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { actualizarPropiedad } from '@/app/actions/arrendador'
+import { actualizarPropiedad } from '@/app/actions/acreedor'
 import Button from '@/components/ui/Button'
 import type { Propiedad } from '@/lib/types'
 import CamposPropiedad from '../CamposPropiedad'

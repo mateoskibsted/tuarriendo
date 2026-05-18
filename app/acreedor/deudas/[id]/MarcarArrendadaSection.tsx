@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { guardarArrendatarioInformal, limpiarArrendatarioInformal } from '@/app/actions/arrendador'
+import { guardarArrendatarioInformal, limpiarArrendatarioInformal } from '@/app/actions/acreedor'
 import type { Moneda, CobroTipo, Propiedad, WhatsAppEstado } from '@/lib/types'
 import { formatUF, formatCLP } from '@/lib/utils/uf'
 import { formatRut, cleanRut } from '@/lib/utils/rut'

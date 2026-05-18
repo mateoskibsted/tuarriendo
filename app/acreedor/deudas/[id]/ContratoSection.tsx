@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { actualizarContrato } from '@/app/actions/arrendador'
+import { actualizarContrato } from '@/app/actions/acreedor'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 

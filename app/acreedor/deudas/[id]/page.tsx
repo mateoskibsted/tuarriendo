@@ -60,7 +60,7 @@ const { data: pagos } = contrato
     <div className="space-y-6 max-w-4xl">
       {/* Header */}
       <div>
-        <Link href="/arrendador" className="text-sm text-gray-500 hover:text-gray-700">
+        <Link href="/acreedor" className="text-sm text-gray-500 hover:text-gray-700">
           ← Volver al panel
         </Link>
         <div className="flex items-start justify-between mt-2">
