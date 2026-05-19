@@ -7,7 +7,7 @@ import type { Pago, EstadoPago } from '@/lib/types'
 const estadoBadge: Record<EstadoPago, { label: string; variant: 'green' | 'red' | 'yellow' | 'orange' | 'blue' | 'gray' }> = {
   pagado: { label: 'Pagado', variant: 'green' },
   pendiente: { label: 'Pendiente', variant: 'yellow' },
-  atrasado: { label: 'Pagado (tarde)', variant: 'green' },
+  atrasado: { label: 'No pagado', variant: 'red' },
   incompleto: { label: 'Incompleto', variant: 'orange' },
 }
 
@@ -52,7 +52,7 @@ export default async function DeudorDashboard() {
   const monto = Math.round(Number(contrato.valor_uf))
 
   const pagosPendientes = (pagos ?? []).filter((p: Pago) => p.estado === 'pendiente')
-  const pagosAtrasados = (pagos ?? []).filter((p: Pago) => p.estado === 'atrasado')
+  const pagosNoPagados = (pagos ?? []).filter((p: Pago) => p.estado === 'atrasado')
 
   return (
     <div className="space-y-6">
@@ -62,10 +62,10 @@ export default async function DeudorDashboard() {
       </div>
 
       {/* Alerts */}
-      {pagosAtrasados.length > 0 && (
+      {pagosNoPagados.length > 0 && (
         <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
           <p className="text-sm font-medium text-red-800">
-            Tienes {pagosAtrasados.length} pago(s) atrasado(s). Contacta a tu acreedor.
+            Tienes {pagosNoPagados.length} deuda{pagosNoPagados.length !== 1 ? 's' : ''} sin pagar. Contacta a tu acreedor.
           </p>
         </div>
       )}

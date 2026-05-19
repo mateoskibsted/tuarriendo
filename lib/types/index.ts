@@ -1,5 +1,6 @@
 // DB role values — kept as-is until DB migration
 export type Role = 'arrendador' | 'arrendatario'
+// DB value is still 'atrasado' — displayed as 'No pagado' until DB migration
 export type EstadoPago = 'pendiente' | 'pagado' | 'atrasado' | 'incompleto'
 export type WhatsAppEstado = 'pendiente' | 'confirmado' | 'rechazado'
 // Kept for backward compat with detail page components pending refactor

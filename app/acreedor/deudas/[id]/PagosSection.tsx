@@ -12,7 +12,7 @@ import type { Pago, EstadoPago } from '@/lib/types'
 const estadoBadge: Record<EstadoPago, { label: string; variant: 'green' | 'red' | 'yellow' | 'blue' | 'gray' | 'orange' }> = {
   pagado: { label: 'Pagado', variant: 'green' },
   pendiente: { label: 'Pendiente', variant: 'yellow' },
-  atrasado: { label: 'Pagado (tarde)', variant: 'green' },
+  atrasado: { label: 'No pagado', variant: 'red' },
   incompleto: { label: 'Incompleto', variant: 'orange' },
 }
 
@@ -154,7 +154,7 @@ export default function PagosSection({
                 <select name="estado" className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                   <option value="pagado">Pagado</option>
                   <option value="pendiente">Pendiente</option>
-                  <option value="atrasado">Atrasado</option>
+                  <option value="atrasado">No pagado</option>
                 </select>
               </div>
             </div>
@@ -268,7 +268,7 @@ export default function PagosSection({
                                 <select name="estado" defaultValue={pago.estado} className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm">
                                   <option value="pagado">Pagado</option>
                                   <option value="pendiente">Pendiente</option>
-                                  <option value="atrasado">Atrasado</option>
+                                  <option value="atrasado">No pagado</option>
                                 </select>
                               </div>
                               <Input label="Notas" name="notas" defaultValue={pago.notas ?? ''} />
@@ -332,7 +332,7 @@ export default function PagosSection({
                       {tieneAtraso && (
                         <tr className={tieneAtraso ? 'bg-orange-50' : ''}>
                           <td colSpan={7} className="px-2 pb-1.5 text-xs text-orange-600">
-                            {filaDiasAtraso} día{filaDiasAtraso !== 1 ? 's' : ''} de atraso
+                            {filaDiasAtraso} día{filaDiasAtraso !== 1 ? 's' : ''} sin pagar
                             {filaMulta > 0 && ` — multa: ${multaMoneda === 'CLP' ? `$${filaMulta.toLocaleString('es-CL')} CLP` : `${filaMulta} ${multaMoneda ?? ''}`}`}
                           </td>
                         </tr>

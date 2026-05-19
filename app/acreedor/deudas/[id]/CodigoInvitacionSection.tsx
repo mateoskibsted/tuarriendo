@@ -31,7 +31,7 @@ export default function CodigoInvitacionSection({
     const base = window.location.origin
     const link = `${base}/registro?codigo=${nuevoCodigo}`
     const mensaje = encodeURIComponent(
-      `Hola, te invito a registrarte en tuarriendo para ver los detalles de tu arriendo.\n\nHaz clic en este link y crea tu cuenta:\n${link}\n\nTu código de acceso es: *${nuevoCodigo}*\n(válido por 7 días)`
+      `Hola, te invito a registrarte en Owe para ver los detalles de tu deuda.\n\nHaz clic en este link y crea tu cuenta:\n${link}\n\nTu código de acceso es: *${nuevoCodigo}*\n(válido por 7 días)`
     )
     window.open(`https://wa.me/?text=${mensaje}`, '_blank')
     setWaSent(true)
