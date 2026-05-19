@@ -335,5 +335,78 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // ── DEUDAS SIMPLES (sin dia_vencimiento, whatsapp_estado='confirmado') ────
+  // Solo en turno mañana — un recordatorio diario mientras no haya pago registrado
+
+  if (!esNoche) {
+    const hoyStr = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`
+    const tipoSimple = `simple_${hoyStr}`
+
+    const { data: simples } = await admin
+      .from('propiedades')
+      .select('id, nombre, valor_uf, moneda, arrendatario_informal_nombre, arrendatario_informal_celular')
+      .eq('activa', true)
+      .eq('whatsapp_estado', 'confirmado')
+      .is('dia_vencimiento', null)
+      .not('arrendatario_informal_celular', 'is', null)
+      .not('arrendatario_informal_nombre', 'is', null)
+
+    if (simples && simples.length > 0) {
+      const simpleIds = simples.map((p: { id: string }) => p.id)
+
+      // Skip debts that already have a payment registered this period
+      const { data: pagosSim } = await admin
+        .from('pagos')
+        .select('propiedad_id')
+        .in('propiedad_id', simpleIds)
+        .eq('periodo', periodoActual)
+        .in('estado', ['pagado', 'atrasado'])
+
+      const pagadosSim = new Set((pagosSim ?? []).map((p: { propiedad_id: string }) => p.propiedad_id))
+
+      // Skip debts already reminded today
+      const { data: logSim } = await admin
+        .from('notificaciones_log')
+        .select('propiedad_id')
+        .in('propiedad_id', simpleIds)
+        .eq('tipo', tipoSimple)
+
+      const yaHoySim = new Set(
+        (logSim ?? [])
+          .filter((n: { propiedad_id: string | null }) => n.propiedad_id)
+          .map((n: { propiedad_id: string }) => n.propiedad_id)
+      )
+
+      for (const prop of simples) {
+        type SimpFull = { id: string; nombre: string; valor_uf: number; moneda: string; arrendatario_informal_nombre: string; arrendatario_informal_celular: string }
+        const s = prop as unknown as SimpFull
+        if (pagadosSim.has(s.id)) continue
+        if (yaHoySim.has(s.id)) continue
+
+        const montoFmt = s.moneda === 'CLP'
+          ? formatCLPLocal(Math.round(Number(s.valor_uf)))
+          : `${s.valor_uf} UF`
+
+        const mensaje =
+          `Hola ${s.arrendatario_informal_nombre} 👋\n\n` +
+          `Recuerda que tienes una deuda pendiente de *${montoFmt}* por *${s.nombre}*.\n\n` +
+          `Escribe *LISTO* cuando hayas pagado y lo reportaré a tu acreedor.`
+
+        const ok = await enviarWhatsApp(s.arrendatario_informal_celular, mensaje)
+        if (ok) {
+          await admin.from('notificaciones_log').insert({
+            contrato_id: null,
+            propiedad_id: s.id,
+            tipo: tipoSimple,
+            periodo: periodoActual,
+            mensaje,
+            exitosa: true,
+          })
+          totalEnviados++
+        }
+      }
+    }
+  }
+
   return NextResponse.json({ ok: true, enviados: totalEnviados, periodo: periodoActual, turno })
 }

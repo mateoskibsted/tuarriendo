@@ -157,7 +157,7 @@ export async function POST(req: NextRequest) {
       return await handleArrendatarioFormal(profileMatch as { id: string; nombre: string; telefono: string }, fromRaw, msgNorm, msgRaw, admin)
     }
 
-    return twiml('Tu número no está registrado en el sistema. Contacta a tu arrendador.')
+    return twiml('Tu número no está registrado en Owe. Pide a tu acreedor que te agregue.')
   } catch (err) {
     console.error('Webhook error:', err)
     return twiml('Error interno. Intenta de nuevo en un momento.')
@@ -183,8 +183,8 @@ async function handleArrendador(
   const primero = pendientes?.[0]
   const hayPendientes = (pendientes ?? []).length > 0
 
-  const esConfirmar = ['confirmar', 'si', 'aprobar', 'confirmo', 'ok'].includes(msgNorm)
-  const esRechazar = ['rechazar', 'no', 'rechazado', 'rechazo'].includes(msgNorm)
+  const esConfirmar = ['resuelto', 'confirmar', 'si', 'aprobar', 'confirmo', 'ok'].includes(msgNorm)
+  const esRechazar = ['pendiente', 'rechazar', 'no', 'rechazado', 'rechazo'].includes(msgNorm)
 
   if (esConfirmar) {
     if (!primero) return twiml(`No tienes pagos pendientes de confirmación, ${nombre}.`)
@@ -242,48 +242,52 @@ async function handleArrendador(
     await admin.from('pagos_pendientes').update({ estado: 'confirmado' }).eq('id', primero.id)
 
     if (arrendatarioCelular) {
-      const msg = `✅ Tu arrendador confirmó tu pago de *${formatCLPLocal(primero.monto_clp)}* para *${propNombre}* (${nombreMes(primero.periodo)}). ¡Gracias!`
-      await enviarWhatsApp(arrendatarioCelular, msg)
+      await enviarWhatsApp(arrendatarioCelular,
+        `✅ ¡Listo! Tu acreedor confirmó que el pago de *${formatCLPLocal(primero.monto_clp)}* por *${propNombre}* está resuelto. ¡Gracias!`
+      )
     }
 
     const resto = (pendientes ?? []).length - 1
-    let resp = `✅ Pago de *${formatCLPLocal(primero.monto_clp)}* de ${primero.arrendatario_nombre ?? 'arrendatario'} confirmado y registrado.`
-    if (resto > 0) resp += `\n\nAún tienes ${resto} pago${resto !== 1 ? 's' : ''} pendiente${resto !== 1 ? 's' : ''}.`
+    let resp = `✅ *RESUELTO* — Pago de *${formatCLPLocal(primero.monto_clp)}* de ${primero.arrendatario_nombre ?? 'deudor'} confirmado.`
+    if (resto > 0) resp += `\n\nAún tienes ${resto} reporte${resto !== 1 ? 's' : ''} pendiente${resto !== 1 ? 's' : ''}.`
     return twiml(resp)
   }
 
   if (esRechazar) {
-    if (!primero) return twiml(`No tienes pagos pendientes de confirmación, ${nombre}.`)
+    if (!primero) return twiml(`No tienes reportes pendientes de revisión, ${nombre}.`)
 
     await admin.from('pagos_pendientes').update({ estado: 'rechazado' }).eq('id', primero.id)
 
     if (primero.arrendatario_phone) {
-      await enviarWhatsApp(primero.arrendatario_phone, `❌ Tu arrendador no pudo confirmar el pago reportado para *${nombreMes(primero.periodo)}*. Por favor contáctalo directamente.`)
+      await enviarWhatsApp(primero.arrendatario_phone,
+        `⏳ Tu acreedor indica que el pago de *${formatCLPLocal(primero.monto_clp)}* por *${propNombre}* aún está *pendiente*.\n\n` +
+        `Por favor realiza el pago y responde *LISTO* cuando lo hayas hecho. Seguirás recibiendo recordatorios.`
+      )
     }
 
     const resto = (pendientes ?? []).length - 1
-    let resp = `❌ Pago de ${primero.arrendatario_nombre ?? 'arrendatario'} rechazado.`
-    if (resto > 0) resp += `\n\nAún tienes ${resto} pago${resto !== 1 ? 's' : ''} pendiente${resto !== 1 ? 's' : ''}.`
+    let resp = `⏳ *PENDIENTE* — Se notificó a ${primero.arrendatario_nombre ?? 'el deudor'} que el pago sigue pendiente.`
+    if (resto > 0) resp += `\n\nAún tienes ${resto} reporte${resto !== 1 ? 's' : ''} por revisar.`
     return twiml(resp)
   }
 
   // Default: show pending list
   if (!hayPendientes) {
     return twiml(
-      `Hola ${nombre}! No tienes pagos pendientes.\n\n` +
-      `Cuando un arrendatario reporte un pago por WhatsApp, recibirás una notificación aquí.\n\n` +
-      `Responde *Confirmar* o *Rechazar* para gestionar reportes.`
+      `Hola ${nombre}! No tienes reportes de pago pendientes.\n\n` +
+      `Cuando un deudor reporte un pago respondiendo *LISTO*, recibirás una notificación aquí.\n\n` +
+      `Responde *RESUELTO* para confirmar o *PENDIENTE* si todavía no está pagado.`
     )
   }
 
   const lista = (pendientes ?? []).map((p, i) =>
-    `${i + 1}. ${p.arrendatario_nombre ?? 'Arrendatario'} — ${formatCLPLocal(p.monto_clp)} (${nombreMes(p.periodo)})`
+    `${i + 1}. ${p.arrendatario_nombre ?? 'Deudor'} — ${formatCLPLocal(p.monto_clp)} (${nombreMes(p.periodo)})`
   ).join('\n')
 
   return twiml(
-    `Hola ${nombre}! Tienes ${pendientes!.length} pago${pendientes!.length !== 1 ? 's' : ''} pendiente${pendientes!.length !== 1 ? 's' : ''}:\n\n` +
+    `Hola ${nombre}! Tienes ${pendientes!.length} reporte${pendientes!.length !== 1 ? 's' : ''} de pago por revisar:\n\n` +
     `${lista}\n\n` +
-    `Responde *Confirmar* para aprobar el más antiguo o *Rechazar* para descartarlo.`
+    `Responde *RESUELTO* para confirmar el más antiguo o *PENDIENTE* si todavía no está pagado.`
   )
 }
 
@@ -344,19 +348,19 @@ async function handleArrendatarioInformal(
         `${nombre} reporta un pago de *${formatCLPLocal(monto)}* para *${propNombre}*.\n\n` +
         `Período: ${nombreMes(periodo)}\n` +
         `Reportado: ${fecha}\n\n` +
-        `Responde *Confirmar* para registrarlo\n` +
-        `Responde *Rechazar* para descartarlo`
+        `Responde *RESUELTO* si el pago ya fue recibido\n` +
+        `Responde *PENDIENTE* si todavía no está pagado`
       await enviarWhatsApp(arrendadorProfile.telefono, msg)
     }
 
     const aviso = arrendadorProfile?.telefono
-      ? '✅ Tu reporte fue enviado a tu arrendador. Te notificaremos cuando sea confirmado.'
-      : '✅ Tu reporte de pago fue registrado. Tu arrendador lo revisará pronto.'
+      ? '✅ Reporte enviado. Tu acreedor lo revisará y te notificaremos cuando responda.'
+      : '✅ Reporte registrado. Tu acreedor lo revisará pronto en el dashboard.'
 
     return twiml(
       `${aviso}\n\n` +
       `Monto reportado: *${formatCLPLocal(monto)}*\n` +
-      `Propiedad: *${propNombre}*\n` +
+      `Deuda: *${propNombre}*\n` +
       `Período: ${nombreMes(periodo)}`
     )
   }
@@ -376,8 +380,8 @@ async function handleArrendatarioInformal(
     const montoTexto = formatMonto(prop.valor_uf as number, prop.moneda as string, ufValue)
 
     return twiml(
-      `Perfecto ${nombre}! Para registrar tu pago de *${propNombre}* necesito el monto.\n\n` +
-      `Valor mensual: ${montoTexto}\n\n` +
+      `Perfecto ${nombre}! Para reportar el pago de *${propNombre}* necesito el monto.\n\n` +
+      `Monto de la deuda: ${montoTexto}\n\n` +
       `¿Cuánto pagaste? Indica el monto en pesos (ej: *450000*)`
     )
   }
@@ -393,15 +397,15 @@ async function handleArrendatarioInformal(
     const montoTexto = formatMonto(prop.valor_uf as number, prop.moneda as string, ufValue)
     return twiml(
       `Listo, ${nombre}! Quedaste conectado a los recordatorios de *${propNombre}*.\n\n` +
-      `Arriendo: ${montoTexto}/mes\n` +
-      (dia ? `Vencimiento: día ${dia} de cada mes\n\n` : '\n') +
-      `Cuando hagas tu pago, escríbeme *Pagado* y te ayudo a reportarlo.`
+      `Monto: ${montoTexto}\n` +
+      (dia && dia !== 1 ? `Vencimiento: día ${dia} de cada mes\n\n` : '\n') +
+      `Cuando hayas pagado, escríbeme *LISTO* y lo reportaré a tu acreedor.`
     )
   }
 
   if (esNo) {
     await admin.from('propiedades').update({ whatsapp_estado: 'rechazado' }).eq('id', propId)
-    return twiml(`Entendido, ${nombre}. Tu decisión fue registrada y será comunicada a tu arrendador.`)
+    return twiml(`Entendido, ${nombre}. Tu acreedor fue notificado. No te enviaremos recordatorios.`)
   }
 
   // ── Default status ────────────────────────────────────────────────────────
@@ -419,9 +423,9 @@ async function handleArrendatarioInformal(
   }
 
   return twiml(
-    `Hola ${nombre}! Soy el asistente de arriendos de *${propNombre}*.\n\n` +
-    `Arriendo: ${montoTexto}/mes${estadoTexto}\n\n` +
-    `Escribe *Pagado* para reportar tu pago.`
+    `Hola ${nombre}! Soy el asistente de Owe para la deuda *${propNombre}*.\n\n` +
+    `Monto: ${montoTexto}${estadoTexto}\n\n` +
+    `Escribe *LISTO* cuando hayas pagado.`
   )
 }
 
@@ -496,13 +500,13 @@ async function handleArrendatarioFormal(
         `${profile.nombre} reporta un pago de *${formatCLPLocal(monto)}* para *${propNombre}*.\n\n` +
         `Período: ${nombreMes(periodo)}\n` +
         `Reportado: ${fecha}\n\n` +
-        `Responde *Confirmar* para registrarlo\n` +
-        `Responde *Rechazar* para descartarlo`
+        `Responde *RESUELTO* si el pago ya fue recibido\n` +
+        `Responde *PENDIENTE* si todavía no está pagado`
       await enviarWhatsApp(arrendadorPhone, msg)
     }
 
     return twiml(
-      `${arrendadorPhone ? '✅ Tu reporte fue enviado a tu arrendador. Te notificaremos cuando sea confirmado.' : '✅ Tu reporte fue registrado. Tu arrendador lo revisará pronto.'}\n\n` +
+      `${arrendadorPhone ? '✅ Reporte enviado. Tu acreedor lo revisará y te notificaremos cuando responda.' : '✅ Reporte registrado. Tu acreedor lo revisará pronto en el dashboard.'}\n\n` +
       `Monto: *${formatCLPLocal(monto)}*\n` +
       `Período: ${nombreMes(periodo)}`
     )
@@ -585,9 +589,9 @@ async function handleArrendatarioFormal(
   }
 
   return twiml(
-    `Hola ${nombre}! Estado de *${propNombre}*:\n\n` +
-    `Arriendo: ${montoTexto}/mes\n` +
+    `Hola ${nombre}! Estado de tu deuda *${propNombre}*:\n\n` +
+    `Monto: ${montoTexto}/mes\n` +
     `${estadoTexto}\n\n` +
-    `Escribe *Pagado* para reportar tu pago.`
+    `Escribe *LISTO* cuando hayas pagado.`
   )
 }

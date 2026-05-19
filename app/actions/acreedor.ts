@@ -625,7 +625,7 @@ export async function crearDeudaSimple(
       descripcion: descripcion || null,
       valor_uf: d.monto,
       moneda: 'CLP',
-      dia_vencimiento: 1,
+      dia_vencimiento: null,  // simple debts have no fixed due date — cron uses this to distinguish
       arrendatario_informal_nombre: d.nombre,
       arrendatario_informal_celular: celularNorm,
       whatsapp_estado: celularNorm ? 'confirmado' : null,

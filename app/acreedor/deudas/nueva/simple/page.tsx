@@ -52,6 +52,7 @@ export default function NuevaDeudaSimplePage() {
   const [descripcion, setDescripcion] = useState('')
 
   // Step 2 state
+  const [meIncluyo, setMeIncluyo] = useState(true)
   const [deudores, setDeudores] = useState<Deudor[]>([{ nombre: '', celular: '', monto: 0 }])
 
   // Step 3 state — montos ajustados
@@ -60,6 +61,12 @@ export default function NuevaDeudaSimplePage() {
   const [step, setStep] = useState(1)
 
   const totalNum = parseFloat(total) || 0
+
+  // Derived split values
+  const partes = meIncluyo ? deudores.length + 1 : deudores.length
+  const splitBase = partes > 0 ? Math.round(totalNum / partes) : 0
+  const totalACobrar = splitBase * deudores.length
+  const miParte = meIncluyo ? totalNum - totalACobrar : 0
 
   // ---------- Step transitions ----------
 
@@ -71,20 +78,16 @@ export default function NuevaDeudaSimplePage() {
   function goStep3() {
     const valid = deudores.every(d => d.nombre.trim())
     if (!valid || deudores.length === 0) return
-    // Auto-split equally
-    const split = Math.round(totalNum / deudores.length)
-    const initial = deudores.map(() => split)
-    // Assign remainder to first
-    const diff = totalNum - split * deudores.length
-    if (diff !== 0) initial[0] += diff
+    // Auto-split: each deudor pays splitBase, remainder absorbed by acreedor's share
+    const initial = deudores.map(() => splitBase)
     setMontos(initial)
     setStep(3)
   }
 
   function goStep4() {
     const sum = montos.reduce((a, b) => a + b, 0)
-    if (Math.abs(sum - totalNum) > 1) {
-      setError(`Los montos suman ${formatCLP(sum)}, pero el total es ${formatCLP(totalNum)}`)
+    if (Math.abs(sum - totalACobrar) > deudores.length) {
+      setError(`Los montos suman ${formatCLP(sum)}, pero el total a cobrar es ${formatCLP(totalACobrar)}`)
       return
     }
     setError('')
@@ -155,7 +158,7 @@ export default function NuevaDeudaSimplePage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1.5">Monto total (CLP)</label>
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">Monto total de la cuenta (CLP)</label>
               <input
                 className={inputClass}
                 type="number"
@@ -197,6 +200,43 @@ export default function NuevaDeudaSimplePage() {
         <>
           <StepHeader step={2} total={4} title="¿Quiénes deben?" />
           <div className="px-5 flex flex-col gap-3 flex-1">
+
+            {/* Me incluyo toggle */}
+            <button
+              type="button"
+              onClick={() => setMeIncluyo(v => !v)}
+              className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border-2 transition-colors ${
+                meIncluyo
+                  ? 'bg-blue-50 border-blue-400'
+                  : 'bg-white border-gray-200'
+              }`}
+            >
+              <div className="text-left">
+                <p className={`text-sm font-bold ${meIncluyo ? 'text-blue-800' : 'text-gray-700'}`}>
+                  ¿Participas en la cuenta?
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {meIncluyo
+                    ? `Sí — tu parte (${formatCLP(miParte > 0 ? miParte : splitBase)}) se descuenta del total`
+                    : 'No — cobras el total completo a los demás'}
+                </p>
+              </div>
+              <div className={`w-12 h-6 rounded-full transition-colors flex items-center px-1 ${meIncluyo ? 'bg-blue-500' : 'bg-gray-300'}`}>
+                <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${meIncluyo ? 'translate-x-6' : 'translate-x-0'}`} />
+              </div>
+            </button>
+
+            {/* Summary chip when meIncluyo */}
+            {meIncluyo && totalNum > 0 && deudores.length > 0 && (
+              <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 flex justify-between items-center">
+                <span className="text-xs text-blue-700">
+                  {deudores.length + 1} personas en total · cada uno paga
+                </span>
+                <span className="text-sm font-bold text-blue-800">{formatCLP(splitBase)}</span>
+              </div>
+            )}
+
+            {/* Deudores */}
             {deudores.map((d, i) => (
               <div key={i} className="bg-white rounded-2xl border border-gray-200 p-4">
                 <div className="flex items-center justify-between mb-3">
@@ -225,6 +265,7 @@ export default function NuevaDeudaSimplePage() {
                 </div>
               </div>
             ))}
+
             <button
               type="button"
               onClick={addDeudor}
@@ -232,9 +273,10 @@ export default function NuevaDeudaSimplePage() {
             >
               + Agregar otra persona
             </button>
-            {totalNum > 0 && deudores.length > 0 && (
+
+            {!meIncluyo && totalNum > 0 && deudores.length > 0 && (
               <p className="text-xs text-gray-400 text-center pb-2">
-                División automática: {formatCLP(Math.round(totalNum / deudores.length))} por persona
+                División: {formatCLP(Math.round(totalNum / deudores.length))} por persona
               </p>
             )}
           </div>
@@ -256,7 +298,23 @@ export default function NuevaDeudaSimplePage() {
         <>
           <StepHeader step={3} total={4} title="Ajustar montos" />
           <div className="px-5 flex flex-col gap-3 flex-1">
-            <p className="text-sm text-gray-500">Cambia los montos si la división no es igual. Total: <strong>{formatCLP(totalNum)}</strong></p>
+            <p className="text-sm text-gray-500">
+              {meIncluyo
+                ? <>Tu parte es <strong>{formatCLP(miParte > 0 ? miParte : splitBase)}</strong>. Ajusta los montos de los demás si es necesario.</>
+                : <>Cobras el total completo. Ajusta si la división no es igual.</>}
+            </p>
+
+            {/* Tu parte (acreedor) si meIncluyo */}
+            {meIncluyo && (
+              <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 flex items-center justify-between opacity-60">
+                <div>
+                  <p className="text-sm font-semibold text-blue-800">Tú (tu parte)</p>
+                  <p className="text-xs text-blue-600">No se cobra — ya la pagas tú</p>
+                </div>
+                <span className="text-sm font-bold text-blue-800">{formatCLP(miParte > 0 ? miParte : splitBase)}</span>
+              </div>
+            )}
+
             {deudores.map((d, i) => (
               <div key={i} className="bg-white rounded-2xl border border-gray-200 p-4 flex items-center gap-3">
                 <div className="flex-1">
@@ -275,11 +333,18 @@ export default function NuevaDeudaSimplePage() {
                 </div>
               </div>
             ))}
+
             {/* Running sum */}
             <div className="bg-gray-100 rounded-xl px-4 py-3 flex justify-between items-center">
-              <span className="text-sm text-gray-600">Suma actual</span>
-              <span className={`text-sm font-bold ${Math.abs(montos.reduce((a, b) => a + b, 0) - totalNum) <= 1 ? 'text-green-600' : 'text-red-500'}`}>
-                {formatCLP(montos.reduce((a, b) => a + b, 0))} / {formatCLP(totalNum)}
+              <span className="text-sm text-gray-600">
+                {meIncluyo ? 'Total a cobrar (sin tu parte)' : 'Total a cobrar'}
+              </span>
+              <span className={`text-sm font-bold ${
+                Math.abs(montos.reduce((a, b) => a + b, 0) - totalACobrar) <= deudores.length
+                  ? 'text-green-600'
+                  : 'text-red-500'
+              }`}>
+                {formatCLP(montos.reduce((a, b) => a + b, 0))} / {formatCLP(totalACobrar)}
               </span>
             </div>
             {error && <p className="text-sm text-red-600 text-center">{error}</p>}
@@ -302,10 +367,23 @@ export default function NuevaDeudaSimplePage() {
           <StepHeader step={4} total={4} title="Confirmar y enviar" />
           <div className="px-5 flex flex-col gap-4 flex-1">
             <div className="bg-white rounded-2xl border border-gray-200 p-4 space-y-2">
-              <p className="text-xs text-gray-400 uppercase font-medium tracking-wide">Deuda</p>
+              <p className="text-xs text-gray-400 uppercase font-medium tracking-wide">Cuenta</p>
               <p className="text-lg font-bold text-gray-900">{titulo}</p>
               {descripcion && <p className="text-sm text-gray-500">{descripcion}</p>}
-              <p className="text-sm font-semibold text-blue-600">Total: {formatCLP(totalNum)}</p>
+              <div className="flex justify-between text-sm pt-1">
+                <span className="text-gray-500">Total cuenta</span>
+                <span className="font-semibold text-gray-900">{formatCLP(totalNum)}</span>
+              </div>
+              {meIncluyo && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Tu parte (descontada)</span>
+                  <span className="font-semibold text-blue-700">− {formatCLP(miParte > 0 ? miParte : splitBase)}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-sm border-t border-gray-100 pt-1">
+                <span className="text-gray-700 font-medium">Total a cobrar</span>
+                <span className="font-bold text-blue-600">{formatCLP(totalACobrar)}</span>
+              </div>
             </div>
             <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100">
               {deudores.map((d, i) => (
@@ -324,8 +402,8 @@ export default function NuevaDeudaSimplePage() {
             <div className="bg-blue-50 rounded-2xl border border-blue-100 p-4">
               <p className="text-sm text-blue-800 font-medium">¿Qué pasa al confirmar?</p>
               <p className="text-xs text-blue-600 mt-1">
-                Cada deudor con WhatsApp recibirá un mensaje inmediato con el monto que debe.
-                Cuando paguen, responderán <strong>LISTO</strong> y tú recibirás la notificación.
+                Cada deudor con WhatsApp recibirá un mensaje con su monto.
+                Cuando paguen, responderán <strong>LISTO</strong> — tú recibirás una notificación para confirmar con <strong>RESUELTO</strong>.
               </p>
             </div>
             {error && <p className="text-sm text-red-600 text-center">{error}</p>}
