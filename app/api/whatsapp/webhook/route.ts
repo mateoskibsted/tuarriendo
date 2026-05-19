@@ -260,7 +260,7 @@ async function handleArrendador(
 
     if (primero.arrendatario_phone) {
       await enviarWhatsApp(primero.arrendatario_phone,
-        `⏳ Tu acreedor indica que el pago de *${formatCLPLocal(primero.monto_clp)}* por *${propNombre}* aún está *pendiente*.\n\n` +
+        `⏳ Tu acreedor indica que el pago de *${formatCLPLocal(primero.monto_clp)}* aún está *pendiente*.\n\n` +
         `Por favor realiza el pago y responde *LISTO* cuando lo hayas hecho. Seguirás recibiendo recordatorios.`
       )
     }
