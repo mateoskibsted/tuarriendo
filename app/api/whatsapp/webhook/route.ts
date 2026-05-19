@@ -76,6 +76,7 @@ const KEYWORDS_PAGO = [
   'pagado', 'ya pagado', 'hice el pago', 'realice el pago', 'hize el pago',
   'transferi', 'deposite', 'hice la transferencia', 'hize la transferencia',
   'ya pago', 'pago listo', 'pague el arriendo', 'ya realize',
+  'listo', 'ya listo', 'pago hecho', 'hecho el pago',
 ]
 
 function esMensajeDePago(msgNorm: string): boolean {

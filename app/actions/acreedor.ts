@@ -605,6 +605,93 @@ export async function rechazarPagoPendienteWeb(pagoId: string) {
   return { success: true }
 }
 
+export async function crearDeudaSimple(
+  titulo: string,
+  descripcion: string,
+  deudores: Array<{ nombre: string; celular: string | null; monto: number }>
+) {
+  const { user, admin } = await getAuthContext()
+  if (!user) return { error: 'No autenticado' }
+
+  const { data: profile } = await admin.from('profiles').select('nombre').eq('id', user.id).single()
+  const acreedorNombre = (profile as { nombre: string } | null)?.nombre ?? 'Tu acreedor'
+
+  for (const d of deudores) {
+    const celularNorm = d.celular ? normalizePhone(d.celular) : null
+    const { error } = await admin.from('propiedades').insert({
+      arrendador_id: user.id,
+      nombre: titulo,
+      direccion: '-',
+      descripcion: descripcion || null,
+      valor_uf: d.monto,
+      moneda: 'CLP',
+      dia_vencimiento: 1,
+      arrendatario_informal_nombre: d.nombre,
+      arrendatario_informal_celular: celularNorm,
+      whatsapp_estado: celularNorm ? 'confirmado' : null,
+      activa: true,
+    })
+    if (error) return { error: error.message }
+
+    if (celularNorm) {
+      const montoFmt = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(d.monto)
+      await enviarWhatsApp(
+        celularNorm,
+        `Hola ${d.nombre}! 👋\n\n*${acreedorNombre}* te registró una deuda de *${montoFmt}* por *${titulo}*.` +
+        (descripcion ? `\nDetalle: ${descripcion}` : '') +
+        `\n\nCuando hayas pagado, responde *LISTO* a este mensaje.`
+      )
+    }
+  }
+
+  revalidatePath('/acreedor')
+  return { success: true }
+}
+
+export async function crearDeudaRecurrente(data: {
+  titulo: string
+  descripcion: string
+  monto: number
+  diaVencimiento: number
+  deudorNombre: string
+  deudorCelular: string | null
+}) {
+  const { user, admin } = await getAuthContext()
+  if (!user) return { error: 'No autenticado' }
+
+  const celularNorm = data.deudorCelular ? normalizePhone(data.deudorCelular) : null
+
+  const { data: inserted, error } = await admin.from('propiedades').insert({
+    arrendador_id: user.id,
+    nombre: data.titulo,
+    direccion: '-',
+    descripcion: data.descripcion || null,
+    valor_uf: data.monto,
+    moneda: 'CLP',
+    dia_vencimiento: data.diaVencimiento,
+    arrendatario_informal_nombre: data.deudorNombre,
+    arrendatario_informal_celular: celularNorm,
+    whatsapp_estado: celularNorm ? 'pendiente' : null,
+    activa: true,
+  }).select('id, nombre').single()
+
+  if (error) return { error: error.message }
+
+  if (celularNorm && inserted) {
+    const montoFmt = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(data.monto)
+    await enviarWhatsApp(
+      celularNorm,
+      `Hola ${data.deudorNombre} 👋\n\n` +
+      `Te han registrado un cobro mensual de *${montoFmt}* por *${inserted.nombre}*.\n\n` +
+      `Recibirás recordatorios automáticos por WhatsApp.\n\n` +
+      `¿De acuerdo?\n✅ Responde *Si* para confirmar\n❌ Responde *No* para rechazar`
+    )
+  }
+
+  revalidatePath('/acreedor')
+  return { success: true }
+}
+
 export async function desvincularArrendatario(contratoId: string) {
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }
