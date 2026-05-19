@@ -190,6 +190,8 @@ Antes de empezar cualquier tarea siempre ejecutar:
 `git pull origin main`
 
 Después de terminar cada tarea siempre ejecutar:
-`git add . && git commit -m "descripción breve" && git push origin main && vercel --prod`
+`git add . && git commit -m "descripción breve" && git push origin main`
+
+Vercel despliega automáticamente al detectar el push en GitHub — NO correr `vercel --prod` manualmente para evitar deployments duplicados.
 
 Al final de cada sesión: actualizar este CLAUDE.md con lo que cambió (nuevas tablas, decisiones de arquitectura, bugs conocidos, notas de deploy).
