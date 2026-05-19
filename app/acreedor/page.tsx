@@ -1,11 +1,10 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import Link from 'next/link'
-import Badge from '@/components/ui/Badge'
-import { formatCLP } from '@/lib/utils/currency'
 import { todayInChile } from '@/lib/utils/date'
 import PagosPendientesWhatsApp from './PagosPendientesWhatsApp'
 import TelefonoArrendadorForm from './TelefonoArrendadorForm'
+import DeudaListClient from './DeudaListClient'
+import type { DeudaCardData } from './DeudaListClient'
 import type { Propiedad, Contrato } from '@/lib/types'
 
 const MAX_DEUDAS = 10
@@ -69,6 +68,52 @@ export default async function AcreedorDashboard() {
     return Math.floor((hoy.getTime() - vencimiento.getTime()) / (24 * 60 * 60 * 1000))
   }
 
+  type PropExtended = Propiedad & {
+    dia_vencimiento: number | null
+    arrendatario_informal_nombre?: string | null
+    arrendatario_informal_fecha_fin?: string | null
+  }
+
+  const deudasCards: DeudaCardData[] = (propiedades ?? []).map((raw: Propiedad) => {
+    const p = raw as PropExtended
+    const contrato = (contratos ?? []).find((c: Contrato) => c.propiedad_id === p.id)
+    const tieneInformal = !contrato && !!p.arrendatario_informal_nombre
+    const deudaVencida = !!(tieneInformal && p.arrendatario_informal_fecha_fin && new Date(p.arrendatario_informal_fecha_fin) < new Date())
+
+    const pagoFormal = contrato ? pagosFormalMap.get(contrato.id) : undefined
+    const pagoInformal = tieneInformal ? pagosInformalMap.get(p.id) : undefined
+    const pago = pagoFormal ?? pagoInformal
+
+    const diaPago = contrato ? (contrato as Contrato & { dia_pago: number }).dia_pago : p.dia_vencimiento ?? undefined
+    const pagado = pago?.estado === 'pagado' || pago?.estado === 'atrasado'
+    const sinPagoAtrasado = !pagado && !!diaPago && diasDeAtraso(diaPago, mesActual) > 0
+    const dias = sinPagoAtrasado ? diasDeAtraso(diaPago!, mesActual) : 0
+    const tieneDeudor = !!(contrato || tieneInformal)
+
+    const nombreDeudor = contrato
+      ? (contrato as Contrato & { profiles: { nombre: string } }).profiles?.nombre ?? null
+      : tieneInformal ? p.arrendatario_informal_nombre ?? null : null
+
+    const badge: DeudaCardData['badge'] = deudaVencida ? 'vencida'
+      : !tieneDeudor ? 'sin_deudor'
+      : pagado ? 'pagado'
+      : sinPagoAtrasado ? 'atrasado'
+      : 'pendiente'
+
+    const tipo: 'simple' | 'recurrente' = p.dia_vencimiento === null ? 'simple' : 'recurrente'
+
+    return {
+      id: p.id,
+      nombre: p.nombre,
+      monto: Math.round(Number(p.valor_uf)),
+      deudorNombre: nombreDeudor,
+      tieneDeudor,
+      badge,
+      diasAtraso: dias,
+      tipo,
+    }
+  })
+
   const pagadosEsteMesFormal = (pagosFormalesEsteMes ?? []).filter((p: PagoResumen) => p.estado === 'pagado' || p.estado === 'atrasado').length
   const pagadosEsteMesInformal = (pagosInformalesEsteMes ?? []).filter((p: PagoResumen) => p.estado === 'pagado' || p.estado === 'atrasado').length
 
@@ -89,13 +134,11 @@ export default async function AcreedorDashboard() {
   return (
     <div className="space-y-8">
 
-      {/* Page header */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Mi panel</h1>
         <p className="text-gray-500 mt-1">{mesNum} {anioNum}</p>
       </div>
 
-      {/* Stats row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Deudas activas" value={`${totalDeudas}`} sub={`de ${MAX_DEUDAS} disponibles`} color="blue" />
         <StatCard label="Con deudor" value={`${deudasConDeudor}`} sub={`de ${totalDeudas} deudas`} color="gray" />
@@ -103,10 +146,8 @@ export default async function AcreedorDashboard() {
         <StatCard label="Sin pago" value={`${sinPagoEsteMes}`} sub={sinPagoEsteMes > 0 ? 'requieren atención' : 'todos al día'} color={sinPagoEsteMes > 0 ? 'red' : 'gray'} />
       </div>
 
-      {/* Pending WhatsApp payments */}
       <PagosPendientesWhatsApp />
 
-      {/* WhatsApp config */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
         <div className="flex items-center gap-2 mb-3">
           <span className="text-lg">💬</span>
@@ -116,89 +157,22 @@ export default async function AcreedorDashboard() {
         {!acreedorTelefono && (
           <p className="text-xs text-gray-400 mt-3">
             Agrega tu número para recibir reportes de pago de tus deudores directamente en WhatsApp.
-            Cuando un deudor escriba <em>Pagado</em> al bot, recibirás una notificación para confirmar.
+            Cuando un deudor escriba <em>Listo</em> al bot, recibirás una notificación para confirmar.
           </p>
         )}
       </div>
 
-      {/* Debts section */}
       <section>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-gray-900">Mis deudas</h2>
-          {puedeAgregarMas ? (
-            <Link href="/acreedor/deudas/nueva" className="bg-blue-800 hover:bg-blue-900 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors">
-              + Nueva deuda
-            </Link>
-          ) : (
-            <span className="text-sm text-gray-400 px-4 py-2 rounded-lg border border-gray-200">Límite alcanzado</span>
-          )}
-        </div>
-
-        {!propiedades || propiedades.length === 0 ? (
+        <h2 className="text-lg font-bold text-gray-900 mb-4">Mis deudas</h2>
+        {deudasCards.length === 0 ? (
           <div className="bg-white border border-gray-200 rounded-xl p-10 text-center">
             <p className="text-gray-500 text-lg mb-3">No tienes deudas registradas.</p>
-            <Link href="/acreedor/deudas/nueva" className="inline-block bg-blue-800 hover:bg-blue-900 text-white font-semibold px-6 py-3 rounded-lg transition-colors">
+            <a href="/acreedor/deudas/nueva" className="inline-block bg-blue-800 hover:bg-blue-900 text-white font-semibold px-6 py-3 rounded-lg transition-colors">
               Agregar primera deuda
-            </Link>
+            </a>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {propiedades.map((p: Propiedad) => {
-              const contrato = (contratos ?? []).find((c: Contrato) => c.propiedad_id === p.id)
-              const pp = p as Propiedad & { arrendatario_informal_nombre?: string; arrendatario_informal_fecha_fin?: string }
-              const tieneInformal = !contrato && !!pp.arrendatario_informal_nombre
-              const deudaVencida = tieneInformal && pp.arrendatario_informal_fecha_fin && new Date(pp.arrendatario_informal_fecha_fin) < new Date()
-
-              const pagoFormal = contrato ? pagosFormalMap.get(contrato.id) : undefined
-              const pagoInformal = tieneInformal ? pagosInformalMap.get(p.id) : undefined
-              const pago = pagoFormal ?? pagoInformal
-
-              const diaPago = contrato ? (contrato as Contrato & { dia_pago: number }).dia_pago : p.dia_vencimiento
-              const pagado = pago?.estado === 'pagado' || pago?.estado === 'atrasado'
-              const sinPagoAtrasado = !pagado && !!diaPago && diasDeAtraso(diaPago, mesActual) > 0
-              const dias = sinPagoAtrasado ? diasDeAtraso(diaPago!, mesActual) : 0
-              const tieneDeudor = !!(contrato || tieneInformal)
-
-              const nombreDeudor = contrato
-                ? (contrato as Contrato & { profiles: { nombre: string } }).profiles?.nombre
-                : tieneInformal ? pp.arrendatario_informal_nombre : null
-
-              return (
-                <Link key={p.id} href={`/acreedor/deudas/${p.id}`} className="block h-full">
-                  <div className={`bg-white border rounded-xl p-5 hover:border-blue-400 transition-colors h-full ${
-                    deudaVencida ? 'border-orange-300' :
-                    sinPagoAtrasado ? 'border-red-300' :
-                    'border-gray-200'
-                  }`}>
-                    <div className="flex justify-between items-start mb-3">
-                      <h3 className="font-bold text-gray-900 text-base leading-tight pr-2">{p.nombre}</h3>
-                      {deudaVencida ? (
-                        <Badge variant="red">Vencida</Badge>
-                      ) : !tieneDeudor ? (
-                        <Badge variant="gray">Sin deudor</Badge>
-                      ) : pagado ? (
-                        <Badge variant="green">Pagado</Badge>
-                      ) : sinPagoAtrasado ? (
-                        <Badge variant="red">Atrasado</Badge>
-                      ) : (
-                        <Badge variant="yellow">Pendiente</Badge>
-                      )}
-                    </div>
-                    <p className="text-xl font-bold text-blue-800 mb-1">{formatCLP(Math.round(Number(p.valor_uf)))}</p>
-                    {sinPagoAtrasado && (
-                      <p className="text-sm text-red-500">{dias} día{dias !== 1 ? 's' : ''} de atraso</p>
-                    )}
-                    <p className="text-sm mt-2">
-                      {nombreDeudor
-                        ? <><span className="text-gray-400">Deudor: </span><span className="text-gray-800 font-medium">{nombreDeudor}</span></>
-                        : <span className="text-amber-500 italic">Sin deudor vinculado</span>
-                      }
-                    </p>
-                  </div>
-                </Link>
-              )
-            })}
-          </div>
+          <DeudaListClient deudas={deudasCards} puedeAgregarMas={puedeAgregarMas} />
         )}
       </section>
     </div>

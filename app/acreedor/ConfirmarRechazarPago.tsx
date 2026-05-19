@@ -36,7 +36,7 @@ export default function ConfirmarRechazarPago({ pago }: { pago: PagoPendiente })
   }
 
   function handleRechazar() {
-    if (!confirm(`¿Rechazar el reporte de pago de ${formatCLP(pago.monto_clp)}?`)) return
+    if (!confirm(`¿Marcar como PENDIENTE el reporte de ${formatCLP(pago.monto_clp)}? El deudor seguirá recibiendo recordatorios.`)) return
     setAccion('rechazar')
     setError('')
     startTransition(async () => {
@@ -54,7 +54,7 @@ export default function ConfirmarRechazarPago({ pago }: { pago: PagoPendiente })
           <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-medium">WhatsApp</span>
         </div>
         <p className="text-sm text-gray-700 mt-0.5">
-          <span className="font-medium">{pago.arrendatario_nombre ?? 'Arrendatario'}</span>
+          <span className="font-medium">{pago.arrendatario_nombre ?? 'Deudor'}</span>
           <span className="text-gray-400"> — {nombreMes(pago.periodo)}</span>
         </p>
         <p className="text-xs text-gray-400 mt-0.5">Reportado: {fecha}</p>
@@ -64,16 +64,16 @@ export default function ConfirmarRechazarPago({ pago }: { pago: PagoPendiente })
         <button
           onClick={handleRechazar}
           disabled={isPending}
-          className="px-4 py-2 text-sm font-semibold text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+          className="px-4 py-2 text-sm font-semibold text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-50 disabled:opacity-50 transition-colors"
         >
-          {accion === 'rechazar' && isPending ? 'Rechazando...' : 'Rechazar'}
+          {accion === 'rechazar' && isPending ? 'Guardando...' : 'PENDIENTE'}
         </button>
         <button
           onClick={handleConfirmar}
           disabled={isPending}
           className="px-5 py-2 text-sm font-bold bg-green-700 hover:bg-green-800 text-white rounded-lg disabled:opacity-50 transition-colors"
         >
-          {accion === 'confirmar' && isPending ? 'Confirmando...' : 'Confirmar pago'}
+          {accion === 'confirmar' && isPending ? 'Guardando...' : 'RESUELTO ✓'}
         </button>
       </div>
     </div>
