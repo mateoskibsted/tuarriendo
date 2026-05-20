@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { crearDeudaRecurrente } from '@/app/actions/acreedor'
 
 function StepHeader({ step, total, title }: { step: number; total: number; title: string }) {
@@ -75,6 +76,9 @@ export default function NuevaDeudaRecurrentePage() {
     setStep(4)
   }
 
+  const [waUrl, setWaUrl] = useState<string | null>(null)
+  const [nombreFinal, setNombreFinal] = useState('')
+
   function handleConfirm() {
     setError('')
     startTransition(async () => {
@@ -89,7 +93,9 @@ export default function NuevaDeudaRecurrentePage() {
       if (result?.error) {
         setError(result.error)
       } else {
-        router.push('/acreedor')
+        setWaUrl(result.waUrl ?? null)
+        setNombreFinal(deudorNombre.trim())
+        setStep(5)
       }
     })
   }
@@ -301,12 +307,12 @@ export default function NuevaDeudaRecurrentePage() {
                 </div>
               )}
             </div>
-            <div className="bg-emerald-50 rounded-2xl border border-emerald-100 p-4">
-              <p className="text-sm text-emerald-800 font-medium">¿Qué pasa al activar?</p>
-              <p className="text-xs text-emerald-700 mt-1">
+            <div className="bg-green-50 rounded-2xl border border-green-100 p-4">
+              <p className="text-sm text-green-800 font-medium">¿Qué pasa al crear?</p>
+              <p className="text-xs text-green-700 mt-1">
                 {deudorCelular
-                  ? `${deudorNombre} recibirá un mensaje de opt-in. Si acepta, el bot enviará recordatorios automáticos 3, 2 y 1 día antes del vencimiento.`
-                  : 'La deuda quedará activa. Si agregas WhatsApp después, el bot empezará los recordatorios.'}
+                  ? `Podrás cobrarle a ${deudorNombre} por WhatsApp directamente. Cada mes decides cuándo reenviar el cobro.`
+                  : 'La deuda quedará activa. Puedes agregar WhatsApp después para cobrar.'}
               </p>
             </div>
             {error && <p className="text-sm text-red-600 text-center">{error}</p>}
@@ -316,12 +322,43 @@ export default function NuevaDeudaRecurrentePage() {
               type="button"
               onClick={handleConfirm}
               disabled={isPending}
-              className="w-full bg-emerald-500 text-white font-bold py-4 rounded-2xl text-base disabled:opacity-50 active:bg-emerald-600 transition-colors"
+              className="w-full bg-green-700 text-white font-bold py-4 rounded-2xl text-base disabled:opacity-50 active:bg-green-800 transition-colors"
             >
-              {isPending ? 'Activando...' : '✅ Activar cobro recurrente'}
+              {isPending ? 'Creando...' : '✅ Crear cobro recurrente'}
             </button>
           </div>
         </>
+      )}
+
+      {/* Step 5: Success */}
+      {step === 5 && (
+        <div className="px-5 pt-10 flex flex-col gap-5 flex-1">
+          <div className="text-center">
+            <p className="text-5xl mb-4">🎉</p>
+            <h2 className="text-2xl font-black text-gray-900">¡Cobro creado!</h2>
+            <p className="text-gray-500 mt-2">
+              {waUrl ? 'Toca Cobrar para abrir WhatsApp con el mensaje listo' : 'Tu cobro recurrente quedó guardado'}
+            </p>
+          </div>
+
+          {waUrl && (
+            <a
+              href={waUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full text-center bg-green-700 hover:bg-green-800 text-white font-bold py-4 rounded-2xl text-base transition-colors"
+            >
+              💬 Cobrar a {nombreFinal}
+            </a>
+          )}
+
+          <Link
+            href="/acreedor"
+            className="w-full text-center py-4 rounded-2xl border border-gray-200 bg-white text-gray-600 font-semibold text-base hover:bg-gray-50 transition-colors"
+          >
+            Ir al inicio
+          </Link>
+        </div>
       )}
     </div>
   )

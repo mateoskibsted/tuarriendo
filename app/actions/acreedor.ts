@@ -5,9 +5,9 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { v4 as uuidv4 } from 'uuid'
 import { cleanRut } from '@/lib/utils/rut'
-import { enviarWhatsApp } from '@/lib/utils/twilio'
 import { todayInChile } from '@/lib/utils/date'
 import { getUFValueForDate } from '@/lib/utils/uf'
+import { generarLinkCobro } from '@/lib/utils/whatsapp'
 
 function normalizePhone(raw: string): string | null {
   if (!raw?.trim()) return null
@@ -82,18 +82,7 @@ export async function crearPropiedad(formData: FormData) {
 
   if (error) return { error: error.message }
 
-  // Send WhatsApp opt-in if phone was provided
-  const celularNorm = campos.arrendatario_informal_celular as string | null
-  if (celularNorm && propInsertada) {
-    const mensaje =
-      `Hola ${arrendatarioNombre} 👋\n\n` +
-      `Tu arrendador te ha registrado como arrendatario de *${propInsertada.nombre}*.\n\n` +
-      `A partir de ahora podrías recibir recordatorios de pago de arriendo por WhatsApp.\n\n` +
-      `¿Estás de acuerdo?\n` +
-      `✅ Responde *Si* para confirmar\n` +
-      `❌ Responde *No* para rechazar`
-    await enviarWhatsApp(celularNorm, mensaje)
-  }
+
 
   revalidatePath('/acreedor')
   return { success: true }
@@ -301,19 +290,6 @@ export async function guardarArrendatarioInformal(propiedadId: string, formData:
 
   if (error) return { error: error.message }
 
-  // Send WhatsApp confirmation if phone is new or changed
-  if (celularCambio && celularNorm) {
-    const propiedadNombre = propiedadActual.nombre
-    const mensaje =
-      `Hola ${nombre} 👋\n\n` +
-      `Tu arrendador te ha registrado como arrendatario de *${propiedadNombre}*.\n\n` +
-      `A partir de ahora podrías recibir recordatorios de pago de arriendo por WhatsApp.\n\n` +
-      `¿Estás de acuerdo?\n` +
-      `✅ Responde *Si* para confirmar\n` +
-      `❌ Responde *No* para rechazar`
-    await enviarWhatsApp(celularNorm, mensaje)
-  }
-
   revalidatePath(`/acreedor/deudas/${propiedadId}`)
   revalidatePath('/acreedor')
   return { success: true }
@@ -488,13 +464,6 @@ export async function actualizarTelefonoArrendador(telefono: string) {
   const { error } = await admin.from('profiles').update({ telefono: normalized }).eq('id', user.id)
   if (error) return { error: error.message }
   revalidatePath('/acreedor')
-  if (normalized) {
-    await enviarWhatsApp(normalized,
-      `✅ Tu número quedó registrado en TuArriendo.\n\n` +
-      `Cuando un arrendatario reporte un pago por WhatsApp, recibirás una notificación aquí.\n\n` +
-      `Para confirmar: responde *Confirmar*\nPara rechazar: responde *Rechazar*`
-    )
-  }
   return { success: true }
 }
 
@@ -613,8 +582,7 @@ export async function crearDeudaSimple(
   const { user, admin } = await getAuthContext()
   if (!user) return { error: 'No autenticado' }
 
-  const { data: profile } = await admin.from('profiles').select('nombre').eq('id', user.id).single()
-  const acreedorNombre = (profile as { nombre: string } | null)?.nombre ?? 'Tu acreedor'
+  const creadas: Array<{ nombre: string; monto: number; waUrl: string | null }> = []
 
   for (const d of deudores) {
     const celularNorm = d.celular ? normalizePhone(d.celular) : null
@@ -625,27 +593,19 @@ export async function crearDeudaSimple(
       descripcion: descripcion || null,
       valor_uf: d.monto,
       moneda: 'CLP',
-      dia_vencimiento: null,  // simple debts have no fixed due date — cron uses this to distinguish
+      dia_vencimiento: null,
       arrendatario_informal_nombre: d.nombre,
       arrendatario_informal_celular: celularNorm,
-      whatsapp_estado: celularNorm ? 'confirmado' : null,
       activa: true,
     })
     if (error) return { error: error.message }
 
-    if (celularNorm) {
-      const montoFmt = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(d.monto)
-      await enviarWhatsApp(
-        celularNorm,
-        `Hola ${d.nombre}! 👋\n\n*${acreedorNombre}* te registró una deuda de *${montoFmt}* por *${titulo}*.` +
-        (descripcion ? `\nDetalle: ${descripcion}` : '') +
-        `\n\nCuando hayas pagado, responde *LISTO* a este mensaje.`
-      )
-    }
+    const waUrl = celularNorm ? generarLinkCobro(celularNorm, titulo, d.monto) : null
+    creadas.push({ nombre: d.nombre, monto: d.monto, waUrl })
   }
 
   revalidatePath('/acreedor')
-  return { success: true }
+  return { success: true, creadas }
 }
 
 export async function crearDeudaRecurrente(data: {
@@ -677,18 +637,27 @@ export async function crearDeudaRecurrente(data: {
 
   if (error) return { error: error.message }
 
-  if (celularNorm && inserted) {
-    const montoFmt = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(data.monto)
-    await enviarWhatsApp(
-      celularNorm,
-      `Hola ${data.deudorNombre} 👋\n\n` +
-      `Te han registrado un cobro mensual de *${montoFmt}* por *${inserted.nombre}*.\n\n` +
-      `Recibirás recordatorios automáticos por WhatsApp.\n\n` +
-      `¿De acuerdo?\n✅ Responde *Si* para confirmar\n❌ Responde *No* para rechazar`
-    )
-  }
+  const waUrl = celularNorm && inserted ? generarLinkCobro(celularNorm, data.titulo, data.monto) : null
 
   revalidatePath('/acreedor')
+  return { success: true, waUrl, deudorNombre: data.deudorNombre }
+}
+
+export async function marcarDeudaComoPagada(deudaId: string) {
+  const { user, admin } = await getAuthContext()
+  if (!user) return { error: 'No autenticado' }
+
+  const { error } = await admin
+    .from('propiedades')
+    .update({ activa: false })
+    .eq('id', deudaId)
+    .eq('arrendador_id', user.id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/acreedor')
+  revalidatePath(`/acreedor/deudas/${deudaId}`)
+  revalidatePath('/acreedor/historial')
   return { success: true }
 }
 

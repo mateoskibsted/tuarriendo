@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { crearDeudaSimple } from '@/app/actions/acreedor'
 
 interface Deudor {
@@ -59,6 +60,8 @@ export default function NuevaDeudaSimplePage() {
   const [montos, setMontos] = useState<number[]>([])
 
   const [step, setStep] = useState(1)
+  const [creadas, setCreadas] = useState<Array<{ nombre: string; monto: number; waUrl: string | null }>>([])
+  const [tituloFinal, setTituloFinal] = useState('')
 
   const totalNum = parseFloat(total) || 0
 
@@ -121,8 +124,10 @@ export default function NuevaDeudaSimplePage() {
       const result = await crearDeudaSimple(titulo.trim(), descripcion.trim(), payload)
       if (result?.error) {
         setError(result.error)
-      } else {
-        router.push('/acreedor')
+      } else if (result?.creadas) {
+        setTituloFinal(titulo.trim())
+        setCreadas(result.creadas)
+        setStep(5)
       }
     })
   }
@@ -399,11 +404,11 @@ export default function NuevaDeudaSimplePage() {
                 </div>
               ))}
             </div>
-            <div className="bg-blue-50 rounded-2xl border border-blue-100 p-4">
-              <p className="text-sm text-blue-800 font-medium">¿Qué pasa al confirmar?</p>
-              <p className="text-xs text-blue-600 mt-1">
-                Cada deudor con WhatsApp recibirá un mensaje con su monto.
-                Cuando paguen, responderán <strong>LISTO</strong> — tú recibirás una notificación para confirmar con <strong>RESUELTO</strong>.
+            <div className="bg-green-50 rounded-2xl border border-green-100 p-4">
+              <p className="text-sm text-green-800 font-medium">¿Qué pasa al confirmar?</p>
+              <p className="text-xs text-green-700 mt-1">
+                Se crean las deudas y te abrimos WhatsApp para cada deudor con el mensaje listo para enviar.
+                Cuando te paguen, marca la deuda como pagada desde el detalle.
               </p>
             </div>
             {error && <p className="text-sm text-red-600 text-center">{error}</p>}
@@ -413,12 +418,57 @@ export default function NuevaDeudaSimplePage() {
               type="button"
               onClick={handleConfirm}
               disabled={isPending}
-              className="w-full bg-blue-600 text-white font-bold py-4 rounded-2xl text-base disabled:opacity-50 active:bg-blue-700 transition-colors"
+              className="w-full bg-green-700 text-white font-bold py-4 rounded-2xl text-base disabled:opacity-50 active:bg-green-800 transition-colors"
             >
-              {isPending ? 'Enviando...' : '✅ Confirmar y enviar'}
+              {isPending ? 'Creando...' : '✅ Crear deuda'}
             </button>
           </div>
         </>
+      )}
+
+      {/* Step 5: Success — cobrar */}
+      {step === 5 && (
+        <div className="px-5 pt-10 flex flex-col gap-5 flex-1">
+          <div className="text-center">
+            <p className="text-5xl mb-4">🎉</p>
+            <h2 className="text-2xl font-black text-gray-900">¡Deuda creada!</h2>
+            <p className="text-gray-500 mt-2">
+              {creadas.filter(c => c.waUrl).length > 0
+                ? 'Toca Cobrar para abrir WhatsApp con el mensaje listo'
+                : 'Tu deuda quedó guardada'}
+            </p>
+          </div>
+
+          <div className="space-y-3 mt-2">
+            {creadas.map((c, i) => (
+              <div key={i} className="bg-white rounded-2xl border border-gray-200 p-4 flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-gray-900">{c.nombre}</p>
+                  <p className="text-sm text-gray-500">{formatCLP(c.monto)}</p>
+                </div>
+                {c.waUrl ? (
+                  <a
+                    href={c.waUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 bg-green-700 hover:bg-green-800 text-white font-bold px-4 py-2.5 rounded-xl text-sm transition-colors"
+                  >
+                    💬 Cobrar
+                  </a>
+                ) : (
+                  <span className="text-xs text-gray-400 shrink-0">Sin WhatsApp</span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <Link
+            href="/acreedor"
+            className="w-full text-center py-4 rounded-2xl border border-gray-200 bg-white text-gray-600 font-semibold text-base hover:bg-gray-50 transition-colors mt-auto"
+          >
+            Ir al inicio
+          </Link>
+        </div>
       )}
     </div>
   )

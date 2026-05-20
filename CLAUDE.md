@@ -1,163 +1,113 @@
 # Owe — Instrucciones del proyecto
 
-App web para gestionar deudas personales entre personas. Permite a acreedores crear y hacer seguimiento de deudas, y a deudores ver lo que deben y reportar pagos.
+App mobile-first para cobrar deudas fácilmente por WhatsApp sin ser incómodo.
+
+**Concepto**: Owe cobra por ti. Registras una deuda → la app genera el mensaje → abres WhatsApp y solo aprietas enviar.
 
 **Casos de uso**: clases particulares, gastos compartidos, ligas deportivas, préstamos entre amigos, servicios freelance.
 
-## Pivote desde ArriendoPro (mayo 2026)
-- `arrendador` → `acreedor` (quien cobra)
-- `arrendatario` → `deudor` (quien debe)
-- `propiedad` → `deuda` (concepto, monto, fecha límite)
-- Eliminado: UF, días fijos de vencimiento, multas automáticas, contratos formales/informales
-- Mantenido: bot WhatsApp bidireccional, crons, Supabase, Twilio
-
 ## Stack técnico
 - **Framework**: Next.js 14 con App Router y TypeScript
-- **Base de datos y auth**: Supabase (RLS habilitado en todas las tablas)
+- **Base de datos y auth**: Supabase (RLS habilitado)
 - **Estilos**: Tailwind CSS
-- **Deploy**: Vercel (Hobby plan — 2 crons)
-- **WhatsApp**: Twilio Sandbox (bot bidireccional: recordatorios + reporte de pagos)
-- **Cron**: 2 Vercel Cron Jobs — mañana (10 AM Chile) y noche (9 PM Chile)
+- **Deploy**: Vercel (Hobby plan)
+- **WhatsApp**: links nativos `https://wa.me/NUMERO?text=MENSAJE` — sin Twilio, sin bots
 
-## Estructura de carpetas objetivo
+## Diseño
+- **Mobile-first**: pantallas de ~375px, botones grandes
+- **Bottom navigation**: Inicio | Nueva | Historial | Perfil
+- **Sin sidebar** — layout simple con header negro y nav inferior
+- **Colores**: navbar gris-950, botones de acción verde-700, badges azul/morado para tipo
+
+## Flujo principal
+1. Acreedor crea deuda (wizard paso a paso)
+2. Al crear → app genera link `wa.me` con mensaje prellenado
+3. Acreedor abre WhatsApp y envía el mensaje con un toque
+4. Cuando le pagan → acreedor marca la deuda como pagada manualmente desde el detalle
+5. Deuda se mueve al historial
+
+## Mensajes WhatsApp
+- **Primera vez**: `Hola! Te escribo desde Owe 📋 Tienes un pago pendiente de $[monto] por [concepto]. Cuando pagues avísame por acá!`
+- **Recordatorio**: `Hola! Te recuerdo que tienes un pago pendiente de $[monto] por [concepto] 🔔`
+- Generados por `lib/utils/whatsapp.ts` → `generarLinkCobro(phone, concepto, monto, esRecordatorio?)`
+
+## Estructura de carpetas
 ```
 app/
   acreedor/
-    page.tsx                        # Dashboard: stats, pagos pendientes WhatsApp, deudas
-    TelefonoAcreedorForm.tsx        # Form cliente para que acreedor guarde su WhatsApp
-    PagosPendientesWhatsApp.tsx     # Server component: lista pagos_pendientes del acreedor
-    ConfirmarRechazarPago.tsx       # Client component: botones confirmar/rechazar pago pendiente
+    layout.tsx              # Auth check + bottom nav
+    page.tsx                # Dashboard: total pendiente + lista deudas activas
+    historial/page.tsx      # Deudas pagadas (activa = false)
+    perfil/page.tsx         # Perfil + logout
     deudas/
-      [id]/page.tsx                 # Detalle de deuda
-      nueva/page.tsx                # Formulario nueva deuda
-  deudor/
-    page.tsx
-  api/
-    cron/
-      manana/route.ts   # 10 AM Chile: llama notificaciones?turno=manana
-      noche/route.ts    # 9 PM Chile: llama notificaciones?turno=noche
-      notificaciones/route.ts  # WhatsApp salientes: aviso_3d/2d/1d + vencimiento + atraso
-    whatsapp/
-      webhook/route.ts  # Bidireccional: deudor reporta pago, acreedor confirma
-  actions/
-    acreedor.ts         # Server Actions: CRUD deudas, pagos, deudores, teléfonos
+      nueva/
+        page.tsx            # Selector tipo: Simple | Recurrente
+        simple/page.tsx     # Wizard 4 pasos + paso 5 éxito con links WA
+        recurrente/page.tsx # Wizard 4 pasos + paso 5 éxito con link WA
+      [id]/
+        page.tsx            # Detalle: monto, deudor, botones Cobrar / Recordatorio / Marcar pagada
+        MarcarPagadaButton.tsx # Client component — set activa=false
+  deudor/page.tsx
+  actions/acreedor.ts       # Server actions (sin Twilio)
   login/page.tsx
   registro/page.tsx
-  layout.tsx
 components/
-  ui/
-    Badge.tsx
-    Button.tsx
-    Input.tsx
-  Navbar.tsx
+  BottomNav.tsx             # Bottom tabs (client component, usePathname)
+  ui/Badge.tsx, Button.tsx, Input.tsx
 lib/
-  supabase/
-    admin.ts      # createAdminClient() — service role, bypasa RLS
-    client.ts     # createClient() — anon key, usa RLS
-    server.ts     # createClient() server-side con cookies
-    middleware.ts
-  types/index.ts
   utils/
-    currency.ts   # formatCLP(), formatMonto() — sin UF
-    date.ts       # todayInChile() — UTC-4 fijo
-    twilio.ts     # enviarWhatsApp(), formatWhatsAppNumber()
-    rut.ts        # Opcional — identificación chilena
-vercel.json       # 2 crons: manana (0 14 * * *) y noche (0 1 * * *)
+    whatsapp.ts  # generarLinkCobro() — genera links wa.me
+    currency.ts  # formatCLP()
+    date.ts      # todayInChile() — UTC-4 fijo
+    rut.ts
+vercel.json
 ```
 
-## Base de datos (tablas objetivo en Supabase)
+## Base de datos
+Sigue usando la tabla `propiedades` (nombre histórico) para deudas.
 
-Todas las tablas tienen **RLS habilitado**. El `createAdminClient()` (service role) bypasa RLS.
+### propiedades (= deudas en Owe)
+- `arrendador_id` = acreedor_id
+- `nombre` = título de la deuda
+- `valor_uf` = monto CLP (nombre histórico, siempre CLP en Owe)
+- `dia_vencimiento = null` → deuda **simple** (evento único)
+- `dia_vencimiento IS NOT NULL` → deuda **recurrente** (cobro mensual)
+- `arrendatario_informal_nombre` = nombre del deudor
+- `arrendatario_informal_celular` = WhatsApp del deudor
+- `activa = true` → pendiente (aparece en dashboard)
+- `activa = false` → pagada (aparece en historial)
+- `descripcion` = detalle opcional
 
 ### profiles
-- id (= auth.users.id), nombre, rut (opcional), email, rol ('acreedor' | 'deudor')
-- telefono (WhatsApp), created_at
+- `id`, `nombre`, `email`, `rut`, `role` ('arrendador' | 'arrendatario'), `created_at`
 
-### deudas
-- id, acreedor_id (FK → profiles)
-- descripcion — qué es la deuda ("Clases de inglés marzo", "Mitad cena cumpleaños")
-- deudor_nombre, deudor_celular (WhatsApp del deudor — no requiere cuenta)
-- monto (CLP), fecha_vencimiento (DATE — fecha límite de pago)
-- estado ('pendiente' | 'pagada' | 'vencida'), activa, created_at
-- whatsapp_estado ('pendiente' | 'confirmado' | 'rechazado') — opt-in del deudor
-
-### pagos_pendientes
-- id, deuda_id (FK → deudas)
-- deudor_phone, deudor_nombre
-- acreedor_id, monto, fecha_reporte
-- estado ('pendiente' | 'confirmado' | 'rechazado'), created_at
-- Creado cuando deudor reporta pago por WhatsApp; acreedor confirma/rechaza desde dashboard o WhatsApp
-
-### whatsapp_sesiones
-- phone (PK), estado ('esperando_monto')
-- deuda_id (nullable)
-- updated_at
-- Estado de conversación multi-turno en el webhook
-
-### notificaciones_log
-- id, deuda_id, tipo, fecha_referencia, mensaje, exitosa, created_at
-- Previene duplicar notificaciones salientes del cron
-
-### codigos_invitacion
-- id, acreedor_id, deuda_id, deudor_email, codigo, usado, expira_en, created_at
-- Para vincular deudores que quieren tener cuenta
+### Otras tablas (legacy, no usadas activamente)
+- `pagos` — historial de pagos por período (ArriendoPro legacy)
+- `contratos` — contratos formales (ArriendoPro legacy)
+- `pagos_pendientes` — reportes WhatsApp (bot legacy, sin uso activo)
+- `notificaciones_log` — log de crons (legacy)
 
 ## Reglas de negocio
 
 ### Moneda
-- Solo CLP (o monto libre ingresado por el acreedor)
-- `formatCLP()` en `lib/utils/currency.ts`
+- Solo CLP
 - **CRÍTICO**: `Math.round(Number(monto))` — Supabase devuelve numéricos como strings
+- `formatCLP()` en `lib/utils/currency.ts`
 
-### Fecha y hora en Chile
-- `todayInChile()` de `lib/utils/date.ts` — UTC-4 fijo desde 2024
+### Tipos de deuda
+- **Simple** (`dia_vencimiento = null`): evento único. Se puede dividir entre N personas con montos editables. Acreedor se puede incluir en el split.
+- **Recurrente** (`dia_vencimiento = 1..28`): cobro mensual fijo. Un solo deudor por deuda.
 
-### Roles y acceso
-- **Acreedor**: crea deudas, gestiona deudores, confirma reportes WhatsApp
-- **Deudor**: ve sus deudas y estado de pagos (opcional — no requiere cuenta)
-- Redirigir automáticamente según rol tras login
+### Marcar como pagada
+- `marcarDeudaComoPagada(id)` → `update propiedades set activa = false`
+- Mueve la deuda del dashboard al historial
+- Para deudas recurrentes: marcar como pagada cierra esa instancia. Si quiere cobrar el mes siguiente, el acreedor crea una nueva o reactiva.
 
-### Flujo principal
-1. Acreedor crea deuda con descripción, monto, fecha_vencimiento y celular del deudor
-2. Bot WhatsApp envía opt-in al deudor automáticamente
-3. Cron envía recordatorios: 3d antes, 2d antes, 1d antes, día de vencimiento, días de atraso
-4. Deudor responde "Pagado" → sesión multi-turno → reporta monto → crea `pagos_pendientes`
-5. Acreedor recibe notificación y confirma/rechaza desde dashboard o WhatsApp
-
-### Flujo WhatsApp bidireccional (webhook `/api/whatsapp/webhook`)
-
-**Identificación por número entrante (orden de prioridad):**
-1. Acreedor (`profiles.rol = 'acreedor'` con telefono)
-2. Deudor (`deudas.deudor_celular`)
-
-**Deudor → "Pagado" (o variantes):**
-1. Webhook detecta keyword de pago → guarda sesión `whatsapp_sesiones.estado = 'esperando_monto'`
-2. Deudor responde con el monto → webhook crea `pagos_pendientes`, borra sesión
-3. Notifica al acreedor por Twilio outbound (si tiene telefono configurado)
-4. Responde al deudor: "Tu reporte fue enviado"
-
-**Acreedor → "Confirmar" / "Rechazar":**
-1. Webhook detecta acreedor → busca `pagos_pendientes` más antiguo (FIFO)
-2. "Confirmar" → actualiza `deudas.estado = 'pagada'`, actualiza `pagos_pendientes.estado = 'confirmado'`, notifica deudor
-3. "Rechazar" → actualiza estado, notifica deudor
-4. Sin pendientes → muestra mensaje informativo
-
-**Opt-in deudor:**
-- "Si" → `deudas.whatsapp_estado = 'confirmado'`
-- "No" → `deudas.whatsapp_estado = 'rechazado'`
-- Opt-in se envía automáticamente al crear deuda con celular
-
-### Bot de WhatsApp — notificaciones salientes (cron)
-- Usa Twilio Sandbox: `whatsapp:+14155238886`
-- Webhook URL: `https://owe-app.vercel.app/api/whatsapp/webhook` *(actualizar con dominio real)*
-- **Mañana** (10 AM Chile, `0 14 * * *` UTC): aviso_3d, aviso_2d, aviso_1d, vencimiento_m, atraso_N_m
-- **Noche** (9 PM Chile, `0 1 * * *` UTC): vencimiento_n, atraso_N_n
-- Deduplicación: `notificaciones_log` previene repetir el mismo `tipo` en la misma `fecha_referencia`
-
-### Identificación de acreedor en webhook
-- El acreedor debe tener su WhatsApp en `profiles.telefono`
-- Configurable desde dashboard (`TelefonoAcreedorForm`)
-- Sin telefono → los reportes WhatsApp solo aparecen en el dashboard web
+### WhatsApp links
+- `generarLinkCobro(phone, concepto, monto, esRecordatorio?)` en `lib/utils/whatsapp.ts`
+- Normaliza número a `56XXXXXXXXX` sin el `+`
+- Retorna `https://wa.me/{numero}?text={mensaje_encodificado}`
+- Los links se muestran en: pantalla de éxito al crear, detalle de deuda, tarjeta en dashboard
 
 ## Convenciones de código
 - TypeScript estricto (no usar `any`)
@@ -171,19 +121,15 @@ Todas las tablas tienen **RLS habilitado**. El `createAdminClient()` (service ro
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
-
-TWILIO_ACCOUNT_SID=
-TWILIO_AUTH_TOKEN=
-TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
-
 CRON_SECRET=
 ```
+(Twilio eliminado — ya no se usa)
 
 ## Vercel — notas de deploy
-
-- Si el build falla por archivos stale del `.next/`: usar `vercel deploy --prod --force`
-- Variables de entorno "Needs Attention": Edit → Save sin cambiar valor
-- Variables obsoletas ya eliminadas (mayo 2026): `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `UF_CACHE_HOURS`
+- Deploy automático al pushear a main en GitHub
+- **NO correr `vercel --prod` manualmente** — genera deployments duplicados
+- Si el build falla por archivos stale: borrar `.next/` localmente y hacer push limpio
+- Variables obsoletas eliminadas: `ANTHROPIC_API_KEY`, `GOOGLE_*`, `UF_CACHE_HOURS`, `TWILIO_*`
 
 ## Regla de colaboración
 Antes de empezar cualquier tarea siempre ejecutar:

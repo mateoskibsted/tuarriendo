@@ -1,33 +1,35 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
-import Navbar from '@/components/Navbar'
-import type { Profile } from '@/lib/types'
+import BottomNav from '@/components/BottomNav'
 
-export default async function ArrendadorLayout({ children }: { children: React.ReactNode }) {
+export default async function AcreedorLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
   if (!user) redirect('/login')
 
-  // Use admin client so RLS never blocks the profile read
   const admin = createAdminClient()
-  const { data: profile } = await admin
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .single()
+  const { data: profile } = await admin.from('profiles').select('*').eq('id', user.id).single()
 
-  // If no profile, go to login — never redirect to the opposite panel (causes loop)
   if (!profile) redirect('/login')
   if (profile.role !== 'arrendador') redirect('/deudor')
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <Navbar profile={profile as Profile} />
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="min-h-screen bg-slate-50 flex flex-col">
+      {/* Top header */}
+      <header className="bg-gray-950 text-white sticky top-0 z-40">
+        <div className="max-w-screen-sm mx-auto px-4 h-14 flex items-center">
+          <span className="font-black text-lg tracking-tight">Owe</span>
+        </div>
+      </header>
+
+      {/* Page content — pb-20 leaves room for bottom nav */}
+      <main className="flex-1 max-w-screen-sm mx-auto w-full px-4 py-6 pb-24">
         {children}
       </main>
+
+      <BottomNav />
     </div>
   )
 }

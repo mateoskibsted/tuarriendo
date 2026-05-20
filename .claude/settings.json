@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit -m 'fix: webhook PENDIENTE handler — propNombre no disponible en esRechazar block *)",
+      "Bash(git commit *)",
+      "Bash(npx vercel *)"
+    ]
+  }
+}

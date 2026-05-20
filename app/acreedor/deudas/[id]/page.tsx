@@ -2,183 +2,130 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { formatUF } from '@/lib/utils/uf'
-import { formatRut } from '@/lib/utils/rut'
-import Badge from '@/components/ui/Badge'
-import type { Pago } from '@/lib/types'
-import EditarPropiedadForm from './EditarPropiedadForm'
-import EliminarPropiedadButton from './EliminarPropiedadButton'
-import PagosSection from './PagosSection'
-import ContratoSection from './ContratoSection'
-import DesvincularButton from './DesvincularButton'
-import MarcarArrendadaSection from './MarcarArrendadaSection'
-import TelefonoArrendatarioForm from './TelefonoArrendatarioForm'
+import { formatCLP } from '@/lib/utils/currency'
+import { generarLinkCobro } from '@/lib/utils/whatsapp'
+import MarcarPagadaButton from './MarcarPagadaButton'
 
-export default async function PropiedadPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function DeudaDetallePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const admin = createAdminClient()
 
-  const { data: propiedad } = await admin
+  const { data: deuda } = await admin
     .from('propiedades')
     .select('*')
     .eq('id', id)
     .eq('arrendador_id', user!.id)
     .single()
 
-  if (!propiedad) notFound()
+  if (!deuda) notFound()
 
-  const { data: contrato } = await admin
-    .from('contratos')
-    .select('*, profiles!contratos_arrendatario_id_fkey(id, nombre, rut, email, telefono)')
-    .eq('propiedad_id', id)
-    .eq('activo', true)
-    .maybeSingle()
+  type DeudaRow = typeof deuda & {
+    dia_vencimiento: number | null
+    arrendatario_informal_nombre?: string | null
+    arrendatario_informal_celular?: string | null
+    descripcion?: string | null
+    activa: boolean
+  }
 
-const { data: pagos } = contrato
-    ? await admin
-        .from('pagos')
-        .select('*')
-        .eq('contrato_id', contrato.id)
-        .order('periodo', { ascending: false })
-        .limit(24)
-    : propiedad.arrendatario_informal_nombre
-    ? await admin
-        .from('pagos')
-        .select('*')
-        .eq('propiedad_id', id)
-        .order('periodo', { ascending: false })
-        .limit(24)
-    : { data: [] }
-
-  const arrendatario = contrato
-    ? (contrato as { profiles: { id: string; nombre: string; rut: string; email: string; telefono?: string } }).profiles
-    : null
+  const d = deuda as DeudaRow
+  const monto = Math.round(Number(d.valor_uf))
+  const celular = d.arrendatario_informal_celular ?? null
+  const waUrlCobro = celular ? generarLinkCobro(celular, d.nombre, monto, false) : null
+  const waUrlRecordatorio = celular ? generarLinkCobro(celular, d.nombre, monto, true) : null
+  const tipo = d.dia_vencimiento === null ? 'simple' : 'recurrente'
+  const isPagada = !d.activa
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-5">
+      {/* Back */}
+      <Link href="/acreedor" className="text-sm text-gray-500 hover:text-gray-800 transition-colors">
+        ← Volver
+      </Link>
+
       {/* Header */}
-      <div>
-        <Link href="/acreedor" className="text-sm text-gray-500 hover:text-gray-700">
-          ← Volver al panel
-        </Link>
-        <div className="flex items-start justify-between mt-2">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">{propiedad.nombre}</h1>
-            <p className="text-gray-500 mt-0.5">{propiedad.direccion}</p>
+      <div className="bg-white rounded-2xl border border-gray-200 p-6">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1">
+            <h1 className="text-xl font-black text-gray-900 leading-tight">{d.nombre}</h1>
+            {d.descripcion && (
+              <p className="text-sm text-gray-500 mt-1">{d.descripcion}</p>
+            )}
           </div>
-          <EliminarPropiedadButton propiedadId={id} />
+          <span className={`text-xs px-2.5 py-1 rounded-full font-semibold shrink-0 ${
+            isPagada ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-700'
+          }`}>
+            {isPagada ? 'Pagada ✓' : 'Pendiente'}
+          </span>
+        </div>
+
+        <p className="text-4xl font-black text-gray-900 mt-4">{formatCLP(monto)}</p>
+
+        <div className="flex items-center gap-2 mt-3">
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+            tipo === 'simple' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
+          }`}>
+            {tipo === 'simple' ? 'Deuda simple' : 'Deuda recurrente'}
+          </span>
         </div>
       </div>
 
-      {/* Editar propiedad */}
-      <EditarPropiedadForm propiedad={propiedad} />
-
-      {/* Arrendatario */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-gray-900">Arrendatario</h3>
-            <p className="text-sm text-gray-500 mt-0.5">
-              {contrato
-                ? 'Inquilino activo vinculado a esta propiedad'
-                : propiedad.arrendatario_informal_nombre
-                ? 'Arrendatario registrado manualmente'
-                : 'Sin arrendatario activo'}
-            </p>
+      {/* Debtor info */}
+      <div className="bg-white rounded-2xl border border-gray-200 p-5">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Deudor</p>
+        {d.arrendatario_informal_nombre ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-500">Nombre</span>
+              <span className="font-semibold text-gray-900">{d.arrendatario_informal_nombre}</span>
+            </div>
+            {celular && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-500">WhatsApp</span>
+                <span className="font-semibold text-gray-900">{celular}</span>
+              </div>
+            )}
           </div>
-          {contrato ? (
-            <Badge variant="green">Activo</Badge>
-          ) : propiedad.arrendatario_informal_nombre ? (
-            <Badge variant="blue">Arrendada</Badge>
-          ) : null}
-        </div>
-        <div className="p-6">
-          {contrato && arrendatario ? (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <InfoRow label="Nombre" value={arrendatario.nombre} />
-                <InfoRow label="RUT" value={formatRut(arrendatario.rut)} />
-                <InfoRow label="Email" value={arrendatario.email ?? '—'} />
-                <InfoRow label="Desde" value={new Date(contrato.fecha_inicio).toLocaleDateString('es-CL')} />
-                <InfoRow label="Día de pago" value={`Día ${contrato.dia_pago} de cada mes`} />
-                <InfoRow label="Valor pactado" value={`${formatUF(contrato.valor_uf)} UF/mes`} />
-              </div>
-              <div className="pt-3 border-t border-gray-100">
-                <TelefonoArrendatarioForm
-                  arrendatarioId={arrendatario.id}
-                  telefonoActual={arrendatario.telefono}
-                />
-              </div>
-              <div className="pt-2 border-t border-gray-100 flex items-center gap-3">
-                <ContratoSection contratoId={contrato.id} valorUf={contrato.valor_uf} diaPago={contrato.dia_pago} />
-                <DesvincularButton contratoId={contrato.id} nombreArrendatario={arrendatario.nombre} />
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <MarcarArrendadaSection
-                id={id}
-                valor_uf={propiedad.valor_uf}
-                moneda={propiedad.moneda}
-                dia_vencimiento={propiedad.dia_vencimiento}
-                multa_monto={propiedad.multa_monto}
-                multa_moneda={propiedad.multa_moneda}
-                arrendatario_informal_nombre={propiedad.arrendatario_informal_nombre}
-                arrendatario_informal_rut={propiedad.arrendatario_informal_rut}
-                arrendatario_informal_email={propiedad.arrendatario_informal_email}
-                arrendatario_informal_celular={propiedad.arrendatario_informal_celular}
-                arrendatario_informal_cobro_tipo={propiedad.arrendatario_informal_cobro_tipo}
-                arrendatario_informal_fecha_inicio={propiedad.arrendatario_informal_fecha_inicio}
-                arrendatario_informal_fecha_fin={propiedad.arrendatario_informal_fecha_fin}
-                whatsapp_estado={propiedad.whatsapp_estado}
-              />
-            </div>
+        ) : (
+          <p className="text-sm text-amber-600 italic">Sin deudor vinculado</p>
+        )}
+      </div>
+
+      {/* Actions */}
+      {!isPagada && (
+        <div className="space-y-3">
+          {waUrlCobro && (
+            <a
+              href={waUrlCobro}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 w-full bg-green-700 hover:bg-green-800 text-white font-bold py-4 rounded-2xl text-base transition-colors"
+            >
+              💬 Cobrar por WhatsApp
+            </a>
           )}
-        </div>
-      </div>
-
-      {/* Pagos */}
-      {contrato ? (
-        <PagosSection
-          contratoId={contrato.id}
-          valorUf={contrato.valor_uf}
-          pagos={(pagos as Pago[]) ?? []}
-          diaVencimiento={contrato.dia_pago}
-          multaMonto={propiedad.multa_monto}
-          multaMoneda={propiedad.multa_moneda}
-          fechaInicio={contrato.fecha_inicio}
-          fechaFin={contrato.fecha_fin}
-          moneda={propiedad.moneda}
-        />
-      ) : propiedad.arrendatario_informal_nombre ? (
-        <PagosSection
-          propiedadId={id}
-          valorUf={propiedad.valor_uf}
-          pagos={(pagos as Pago[]) ?? []}
-          diaVencimiento={propiedad.dia_vencimiento}
-          multaMonto={propiedad.multa_monto}
-          multaMoneda={propiedad.multa_moneda}
-          fechaInicio={propiedad.arrendatario_informal_fecha_inicio}
-          fechaFin={propiedad.arrendatario_informal_fecha_fin}
-          moneda={propiedad.moneda}
-        />
-      ) : (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-          <h3 className="text-base font-semibold text-gray-900 mb-2">Pagos</h3>
-          <p className="text-sm text-gray-500">Disponible una vez que haya un arrendatario vinculado.</p>
+          {waUrlRecordatorio && (
+            <a
+              href={waUrlRecordatorio}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 w-full bg-white hover:bg-gray-50 text-gray-700 font-semibold py-4 rounded-2xl text-base border border-gray-200 transition-colors"
+            >
+              🔔 Enviar recordatorio
+            </a>
+          )}
+          <MarcarPagadaButton deudaId={id} />
         </div>
       )}
-    </div>
-  )
-}
 
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-xs text-gray-500 mb-0.5">{label}</p>
-      <p className="text-sm font-medium text-gray-900">{value}</p>
+      {isPagada && (
+        <div className="bg-green-50 border border-green-200 rounded-2xl p-5 text-center">
+          <p className="text-2xl mb-1">✅</p>
+          <p className="font-semibold text-green-800">Esta deuda fue marcada como pagada</p>
+          <p className="text-sm text-green-600 mt-1">Aparece en tu historial</p>
+        </div>
+      )}
     </div>
   )
 }
