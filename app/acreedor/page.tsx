@@ -167,7 +167,7 @@ export default async function AcreedorDashboard() {
         {deudasCards.length === 0 ? (
           <div className="bg-white border border-gray-200 rounded-xl p-10 text-center">
             <p className="text-gray-500 text-lg mb-3">No tienes deudas registradas.</p>
-            <a href="/acreedor/deudas/nueva" className="inline-block bg-blue-800 hover:bg-blue-900 text-white font-semibold px-6 py-3 rounded-lg transition-colors">
+            <a href="/acreedor/deudas/nueva" className="inline-block bg-green-700 hover:bg-green-800 text-white font-semibold px-6 py-3 rounded-lg transition-colors">
               Agregar primera deuda
             </a>
           </div>

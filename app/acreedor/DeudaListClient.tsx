@@ -73,7 +73,7 @@ export default function DeudaListClient({
           {puedeAgregarMas ? (
             <Link
               href="/acreedor/deudas/nueva"
-              className="block w-full md:w-auto text-center bg-blue-800 hover:bg-blue-900 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors"
+              className="block w-full md:w-auto text-center bg-green-700 hover:bg-green-800 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors"
             >
               + Nueva deuda
             </Link>
@@ -130,7 +130,7 @@ export default function DeudaListClient({
               ? 'No tienes deudas simples. Son gastos puntuales como cenas, ligas o préstamos.'
               : 'No tienes deudas recurrentes. Son cobros mensuales como arriendo o clases.'}
           </p>
-          <Link href="/acreedor/deudas/nueva" className="inline-block bg-blue-800 hover:bg-blue-900 text-white font-semibold px-6 py-3 rounded-lg transition-colors text-sm">
+          <Link href="/acreedor/deudas/nueva" className="inline-block bg-green-700 hover:bg-green-800 text-white font-semibold px-6 py-3 rounded-lg transition-colors text-sm">
             Crear deuda {tab === 'simple' ? 'simple' : 'recurrente'}
           </Link>
         </div>
