@@ -2,23 +2,18 @@
 
 import { useState, useTransition } from 'react'
 import { login } from '@/app/actions/auth'
-import { formatRut, cleanRut } from '@/lib/utils/rut'
 import Link from 'next/link'
 
+const inputClass = "block w-full rounded-xl border border-gray-200 bg-white px-4 py-3.5 text-base placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-950 focus:border-transparent"
+
 export default function LoginPage() {
-  const [rut, setRut] = useState('')
   const [error, setError] = useState('')
   const [isPending, startTransition] = useTransition()
-
-  function handleRutChange(e: React.ChangeEvent<HTMLInputElement>) {
-    setRut(formatRut(e.target.value))
-  }
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError('')
     const formData = new FormData(e.currentTarget)
-    formData.set('rut', cleanRut(rut))
     startTransition(async () => {
       const result = await login(formData)
       if (result?.error) setError(result.error)
@@ -27,35 +22,30 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center px-4">
-      {/* Logo + marca */}
       <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-blue-900 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-md">
+        <div className="w-16 h-16 bg-gray-950 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-md">
           <span className="text-white font-black text-xl">Owe</span>
         </div>
         <h1 className="text-3xl font-black text-gray-900">Owe</h1>
-        <p className="text-gray-500 mt-1">Gestión de deudas personales</p>
+        <p className="text-gray-500 mt-1">Cobra fácil por WhatsApp</p>
       </div>
 
-      {/* Card */}
-      <div className="w-full max-w-md bg-white rounded-2xl border border-gray-200 shadow-sm p-8">
-        <h2 className="text-xl font-bold text-gray-900 mb-6">Ingresar a mi cuenta</h2>
+      <div className="w-full max-w-sm bg-white rounded-2xl border border-gray-200 shadow-sm p-8">
+        <h2 className="text-xl font-bold text-gray-900 mb-6">Ingresar</h2>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {/* RUT */}
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <label className="block text-sm font-semibold text-gray-700">RUT</label>
+            <label className="block text-sm font-semibold text-gray-700">Email</label>
             <input
-              name="rut"
-              value={rut}
-              onChange={handleRutChange}
-              placeholder="12.345.678-9"
+              name="email"
+              type="email"
+              placeholder="tu@email.com"
               required
-              autoComplete="username"
-              className="block w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-base placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-700 focus:border-transparent"
+              autoComplete="email"
+              className={inputClass}
             />
           </div>
 
-          {/* Contraseña */}
           <div className="space-y-1.5">
             <label className="block text-sm font-semibold text-gray-700">Contraseña</label>
             <input
@@ -64,12 +54,12 @@ export default function LoginPage() {
               placeholder="••••••••"
               required
               autoComplete="current-password"
-              className="block w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-base placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-700 focus:border-transparent"
+              className={inputClass}
             />
           </div>
 
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
               <p className="text-sm text-red-700">{error}</p>
             </div>
           )}
@@ -77,7 +67,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isPending}
-            className="w-full bg-blue-800 hover:bg-blue-900 text-white font-bold py-3.5 px-6 rounded-lg text-base transition-colors disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+            className="w-full bg-gray-950 hover:bg-gray-800 text-white font-bold py-4 rounded-xl text-base transition-colors disabled:opacity-50 mt-2"
           >
             {isPending ? 'Ingresando...' : 'Ingresar'}
           </button>
@@ -85,8 +75,8 @@ export default function LoginPage() {
 
         <p className="text-center text-sm text-gray-500 mt-6">
           ¿No tienes cuenta?{' '}
-          <Link href="/registro" className="text-blue-700 hover:underline font-semibold">
-            Regístrate aquí
+          <Link href="/registro" className="text-green-700 hover:underline font-semibold">
+            Regístrate gratis
           </Link>
         </p>
       </div>
